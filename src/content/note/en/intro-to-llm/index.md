@@ -94,7 +94,7 @@ All the activities records and metrics collected will be grouped by range name a
 
 Kernel launch is where CUDA assigns computation tasks to the GPU. The number of kernels and the size of blocks and grids can produce profound impact on system performance. Ideally, each kernel should have enough blocks and threads so that it doesn’t under utilize the compute resources. On the other hand, too many blocks, threads or kernel launches themselves will accumulate overheads and severely hurt the overall performance. In this section, we will see how the two implementations differ and why they differ. In later sections, we will discuss how these differences impact the performance
 
-<center>Number of Kernels In The Ranges<center>
+<center>Number of Kernels In The Ranges</center>
 | Framework / Range         | attention | ln1 | ln2  | mlp | residual1 | residual2 |
 |----------------------------|------------|----------|-----|-----|-----|------------|
 | **Eigen**                 | 440        | 2   | 3   | 5   | 1          | 1          |
@@ -122,7 +122,7 @@ for (int b = 0; b < B; ++b)
 
 This piece of code is looping over batch size and number of heads. There are two matrix multiplications and softmax in each iteration, which will produce quite a lot of kernels. With B=4 and NH=12, all these kernels are repeated 48 times, so no surprise so many kernels are launched. This exemplifies a pitfall of GPU programming. It is common and fine to use for loops when we write programs for CPU, but the misuse of for loops on GPU programs can heavily downgrade the performance. We will discuss the performance drop in the next section.
 
-<center>Grid And Block Size Statistics<center>
+<center>Grid And Block Size Statistics</center>
 |  | Eigen | CCCL |
 | :---- | :---- | :---- |
 | min | 1 | 16 |
@@ -165,7 +165,7 @@ $$AvgLaunchOverhead = \frac{RangeWallClockTime - GpuExecutionTime}{KernelNum}$$
 
 The result is presented here:
 
-<center>Average Gap Between Wall Clock Time And GPU Time<center>
+<center>Average Gap Between Wall Clock Time And GPU Time</center>
 | Layer         | Eigen Avg Gap (µs) | CCCL Avg Gap (µs) |
 |----------------|--------------------------------|--------------------------------|
 | ln1            | 5.136                          | 14.544                         |
