@@ -244,10 +244,12 @@
 	div.table-wrapper {
 		padding-bottom: 0.5rem;
 		overflow-x: auto;
+		text-align: center;
 	}
 
 	table {
 		border-collapse: collapse;
+		margin: 0 auto;
 
 		border-top: 3px solid var(--primary-color);
 		border-bottom: 3px solid var(--primary-color);
@@ -368,6 +370,20 @@
 
 	* {
 		font-family: "KaTeX_Main", var(--serif);
+	}
+
+	// Increase font size for all math expressions
+	font-size: 1.3em;
+
+	// Alternative selector for fractions
+	.mfrac {
+		> .frac-line {
+			border-bottom-width: 0.1em;
+		}
+		
+		> span {
+			font-size: 1.3em;
+		}
 	}
 
 	&-display {
