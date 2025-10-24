@@ -36,7 +36,8 @@ import reading from "./src/utils/remark/reading";
 
 // https://astro.build/config
 export default defineConfig({
-  site: "https://ml-memory-profiling-group.github.io/blog_v2/",
+  site: "https://ml-memory-profiling-group.github.io/",
+  base: "/blog_v2",
   trailingSlash: "never",
   i18n: {
     locales: ["en", "zh-cn", "ja"],
