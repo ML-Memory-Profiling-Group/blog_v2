@@ -94,7 +94,7 @@ All the activities records and metrics collected will be grouped by range name a
 
 Kernel launch is where CUDA assigns computation tasks to the GPU. The number of kernels and the size of blocks and grids can produce profound impact on system performance. Ideally, each kernel should have enough blocks and threads so that it doesn’t under utilize the compute resources. On the other hand, too many blocks, threads or kernel launches themselves will accumulate overheads and severely hurt the overall performance. In this section, we will see how the two implementations differ and why they differ. In later sections, we will discuss how these differences impact the performance
 
-**Number of Kernels In The Ranges**
+<center>Number of Kernels In The Ranges<center>
 | Framework / Range         | attention | ln1 | ln2  | mlp | residual1 | residual2 |
 |----------------------------|------------|----------|-----|-----|-----|------------|
 | **Eigen**                 | 440        | 2   | 3   | 5   | 1          | 1          |
@@ -122,7 +122,7 @@ for (int b = 0; b < B; ++b)
 
 This piece of code is looping over batch size and number of heads. There are two matrix multiplications and softmax in each iteration, which will produce quite a lot of kernels. With B=4 and NH=12, all these kernels are repeated 48 times, so no surprise so many kernels are launched. This exemplifies a pitfall of GPU programming. It is common and fine to use for loops when we write programs for CPU, but the misuse of for loops on GPU programs can heavily downgrade the performance. We will discuss the performance drop in the next section.
 
-**Grid And Block Size Statistics**
+<center>Grid And Block Size Statistics<center>
 |  | Eigen | CCCL |
 | :---- | :---- | :---- |
 | min | 1 | 16 |
@@ -165,7 +165,7 @@ $$AvgLaunchOverhead = \frac{RangeWallClockTime - GpuExecutionTime}{KernelNum}$$
 
 The result is presented here:
 
-**Average Gap Between Wall Clock Time And GPU Time**
+<center>Average Gap Between Wall Clock Time And GPU Time<center>
 | Layer         | Eigen Avg Gap (µs) | CCCL Avg Gap (µs) |
 |----------------|--------------------------------|--------------------------------|
 | ln1            | 5.136                          | 14.544                         |
@@ -205,11 +205,11 @@ We divide 32 because the issued SASS instructions are counted in warps. The 4 co
 
 When SASS loads and stores are executed in the thread, they will be coalesced with other instructions executed by other threads within the warp and sent to L1. If the request missed,L1 will forward the request to L2. If it still misses, L2 will send requests to the dram in sectors. Here are the metrics we are interested and we will still show the residual range as an example:  
 
-* L1tex\_\_t\_requests\_pipe\_lsu\_mem\_global\_op\_ld.sum: approximately the global load requests L1 cache received from the warps. The “lsu” implies that the requests are from the load store unit. The “approximately” means there might be requests other than global loads, like LDSTS instructions, but this is not so important and is beyond the scope of this blog. In most cases, you can find that it ballparkly matches the number of SASS load requests.  
-* L1tex\_\_t\_sectors\_pipe\_lsu\_mem\_global\_op\_ld.sum is the number of sectors accessed by the requests received by L1 cache. In general this metric should be greater or equal to smsp\_\_sass\_data\_bytes\_mem\_global\_op\_ld.sum/32. Since the warps access contiguous and 32-aligned addresses in residual range, it exactly matches that result.   
-* Lts\_\_t\_requests\_srcunit\_tex\_op\_read.sum: the requests L2 cache received from L1.  
-* Lts\_\_t\_sectors\_srcunit\_tex\_op\_read.sum: the sectors accessed by the L2 requests from L1. Each request can contain 1\~4 sectors. This metric also represents how many sectors L1 missed.  
-* Dram\_\_sectors\_read.sum: sectors requested from L2 because of L2 misses.Note that though dram sends the data in bursts, the unit of these metrics is 32 byte sectors, so these metrics should be the actual bytes loaded divided by 32\.
+* l1tex\_\_t\_requests\_pipe\_lsu\_mem\_global\_op\_ld.sum: approximately the global load requests L1 cache received from the warps. The “lsu” implies that the requests are from the load store unit. The “approximately” means there might be requests other than global loads, like LDSTS instructions, but this is not so important and is beyond the scope of this blog. In most cases, you can find that it ballparkly matches the number of SASS load requests.  
+* l1tex\_\_t\_sectors\_pipe\_lsu\_mem\_global\_op\_ld.sum is the number of sectors accessed by the requests received by L1 cache. In general this metric should be greater or equal to smsp\_\_sass\_data\_bytes\_mem\_global\_op\_ld.sum/32. Since the warps access contiguous and 32-aligned addresses in residual range, it exactly matches that result.   
+* lts\_\_t\_requests\_srcunit\_tex\_op\_read.sum: the requests L2 cache received from L1.  
+* lts\_\_t\_sectors\_srcunit\_tex\_op\_read.sum: the sectors accessed by the L2 requests from L1. Each request can contain 1\~4 sectors. This metric also represents how many sectors L1 missed.  
+* dram\_\_sectors\_read.sum: sectors requested from L2 because of L2 misses.Note that though dram sends the data in bursts, the unit of these metrics is 32 byte sectors, so these metrics should be the actual bytes loaded divided by 32\.
 
 ![][residual-accesses]
 
