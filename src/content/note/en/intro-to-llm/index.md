@@ -166,6 +166,7 @@ $$AvgLaunchOverhead = \frac{RangeWallClockTime - GpuExecutionTime}{KernelNum}$$
 The result is presented here:
 
 <center>Average Gap Between Wall Clock Time And GPU Time</center>
+
 | Layer         | Eigen Avg Gap (µs) | CCCL Avg Gap (µs) |
 |----------------|--------------------------------|--------------------------------|
 | ln1            | 5.136                          | 14.544                         |
