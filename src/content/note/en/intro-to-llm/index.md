@@ -32,7 +32,7 @@ This reference will also be valuable in the next section, where we develop the r
 |LLM Layer|Block::Forward @ gpt.hpp|encoder_forward @ train_gpt2.cu|
 |LayerNorm|nn::LayerNorm::Forward @ nn.hpp|layernorm_forward @ train_gpt2.cu(layernorm_forward_kernel3)|
 |QKV Linear Projection|CausalSelfAttention::Forward @ gpt.hpp(c_attn_->Forward)|matmul_forward_cublaslt @ train_gpt2.cu(cublasLtMatmul)|
-|Self Attention: QKT|nn::MatMul::Forward @ gpt.hpp|attention_forward @ train_gpt2.cu(cublasSgemmStridedBatched)|
+|Self Attention: $QK^T$|nn::MatMul::Forward @ gpt.hpp|attention_forward @ train_gpt2.cu(cublasSgemmStridedBatched)|
 |Self Attention: Softmax|nn::Softmax::Forward @ gpt.hpp|softmax_forward_kernel5 @ train_gpt2.cu|
 |Self Attention: Value Matmul|nn::Softmax::Forward @ gpt.hpp|attention_forward @ train_gpt2.cu(cublasSgemmStridedBatched)|
 |O Linear Projection|nn::MatMul::Forward @ gpt.hpp|matmul_forward_cublaslt @ train_gpt2.cu(cublasLtMatmul)|
@@ -76,19 +76,57 @@ GmpProfiler::getInstance()-\>pushRange/popRange is the API of our profiler that 
 All the activities records and metrics collected will be grouped by range name and accumulated or averaged among all the kernels’ data within the range, so that we can understand how each phase of the LLM performs.
 
 # Performance Analysis
+For our performance analysis, we will use the default, out-of-the-box parameters provided in the LLM repositories.
+* Vocabulary Size ($V$): 50304 (padded)
+* Number of Layers ($L$): 12
+* Sequence Length ($T$): 64
+* Hidden Size ($H$): 768
+* Number of Attention Heads ($A$): 12
+* Batch Size ($B): 4
 
 ## Roofline Performance
+Understanding a system’s performance in isolation is challenging; it’s far more meaningful to compare against an established baseline or rigorous theoretical limits. For our analysis, we will use the Roofline Model. Its a powerful analytical framework that defines the maximum achievable performance of a given application on a specific hardware system. It works by first determining two key application characteristics: the required computational intensity (FLOPs) and the necessary memory transfers. For a given application and hardware, relates arithmetic intensity (FLOPs per byte moved) to the machine’s peak compute and peak memory bandwidth. It tells you whether a kernel is compute-bound or memory-bound, and sets a clear ceiling on the performance you can expect on that system. For a concise introduction, see the NERSC guide to the [roofline model](https://docs.nersc.gov/tools/performance/roofline/). Further references will be provided at the end of this post.
+
+As we construct the roofline model for each sub-block in a GPT-2 layer, the first step is to quantify memory traffic. The table below enumerates the activation tensors (shapes and data types) produced and consumed by each sub-block;
 | SUB BLOCKS | NUM ELEMENTS | TOTAL SIZE (MB)|
 |------------|--------------|----------------|
 |Input | B * T * C | 0.75 |
 |Layer Norm | B * L * T * C | 2.25 |
 |Q, K, V | B * L * T * 3C | 6.75 |
-|SoftMAX(QKT) | B * L * H * T * T | 2.25 |
+|SoftMAX($QK^T$) | B * L * H * T * T | 2.25 |
 |O | B * L * T * C | 2.25 |
 |Residual | B * L * T * C | 2.25 |
 |MLP1 | B * L * T * 4C | 9 |
 |MLP GeLU | B * L * T * 4C | 9 |
 |MLP2 | B * L * T * C | 2.25 |
+
+Refer to the table below for a breakdown of the computations performed by each sub-block—including key operations and FLOP counts.
+| SUB BLOCKS | Operations | Total OPs|
+|------------|------------|----------|
+|LayerNorm | Element Wise - {Mean: 1x ADD} {RSTD: 1x SQRT, 1x ADD} {Norm & Scale: 1x ADD, 1x SUB, 2x MUL} | 7 * B * T * C|
+|Q, K, V | Dense GEMM: (BT x C) x (C x 3C) | 6 * B * T * $C^2$|
+|$QK^T$ | Batch & Head Wise - Dense GEMM: (T x C/H) x (C/H x T)| 2 * B * $T^2$ * C|
+|SoftMAX |Element Wise - {1x EXP, 1x ADD, 1x DIV}| 3 * B * H * $T^2$|
+|V Matmul | Dense GEMM: (T x T) x (T x C/H)| 2 * B * $T^2$ * C|
+|O | Dense GEMM: (BT x C) x (C x C) | 2 * B * T * $C^2$|
+|Residual | Element Wise - {1x ADD}| B * T * C|
+|MLP1 | Dense GEMM: (BT x C) x (C x 4C)| 8 * B * T * $C^2$|
+|MLP2 | Dense GEMM: (BT x 4C) x (4C x C)| 8 * B * T * $C^2$|
+
+Using these two tables, we compute the arithmetic intensity (AI) for each sub-block, classify each as compute-bound or memory-bound, and then derive its roofline performance ceiling accordingly. The table below walks through these steps and reports the resulting roofline limits for all sub-blocks.
+|SUB BLOCKS | AI | Bound | Execution Time (us)|
+|-----------|----|-------|--------------------|
+|LayerNorm | < 1 | Memory | |
+|Q, K, V | > 80 | Compute | |
+|$QK^T$ | > 40 | Compute | |
+|SoftMAX | < 1 | Memory | |
+|V Matmul | > 40 | Compute | |
+|O | > 300 | Compute | |
+|Residual | < 0.1 | Memory | |
+|MLP1 | > 300 | Compute | |
+|MLP2 | > 300 | Compute | |
+
+With our definitive Roofline Performance figures now established, we transition from theoretical limits to real-world measurement. We will examine the actual performance attained by both the LLM implemntations compare it against these theoretical ceilings to understand how closely each implementation approaches its roofline—and where performance gaps emerge.
 
 ## Kernel Invocations
 
