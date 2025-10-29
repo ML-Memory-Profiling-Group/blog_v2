@@ -80,6 +80,9 @@ GmpProfiler::getInstance()-\>pushRange/popRange is the API of our profiler that 
 
 All the activities records and metrics collected will be grouped by range name and accumulated or averaged among all the kernels’ data within the range, so that we can understand how each phase of the LLM performs.
 
+We partitioned a transformer layer into performance-regions, as illustrated in the figure. Although our primary focus is on the two dominant, compute-heavy sections—Attention and MLP, we intentionally retained the non-compute intensive blocks. It would be interesting to understand how much they contribute to overall performance, but, as we will see, they offer interesting insights during profiling and performance analysis.
+![Performance Regions](CUPTI-LLM-Range.png)
+
 # Performance Analysis
 For our performance analysis, we will use the default, out-of-the-box parameters provided in the LLM repositories.
 * Vocabulary Size ($V$): 50304 (padded)
@@ -134,6 +137,16 @@ Using these two tables, we compute the arithmetic intensity (AI) for each sub-bl
 With our definitive Roofline Performance figures now established, we transition from theoretical limits to real-world measurement. We will examine the actual performance attained by both the LLM implemntations compare it against these theoretical ceilings to understand how closely each implementation approaches its roofline—and where performance gaps emerge.
 
 ## Kernel Invocations
+The kernel launch is the mechanism by which CUDA assigns computation tasks to the GPU's Streaming Multiprocessors (SMs) with a specified grid–block–thread configuration. Kernel launches introduce inherent overhead, and choices of grid/block sizes has profound impact on system performance, can either underutilize the GPU or add excess launch/scheduling overhead. This nuanced decision-making process is a craft—balancing occupancy, memory access patterns, and launch counts. Exactly why good GPU programmers are valued, and (yes) paid handsomely in today's AI industry and this blog will take you a step in that direction. Alright, enough of the sales pitch, back to the performance that matters. For readers interested in the intricate details, NVIDIA’s GTC talks and CUDA performance guides walk through the trade-offs. 
+The table below provides a direct comparison of the kernel launch behavior of the two implementations. Note that LLM-Eigen relies on Eigen as its backend, which translates high-level tensor operations into multiple kernel launches, whereas LLM-CCCL directly invokes CUDA kernels for each sub-block.
+|PERF-REGIONS|LLM-Eigen|LLM-CCCL|
+|----------|---------|--------|
+|LayerNorm 1|{Num Kernels:2} {Gird:} {Block:}|{Num Kernels:1} {Gird:} {Block:}|
+|Attention|{Num Kernels:440} {Gird:} {Block:}|{Num Kernels:8} {Gird:} {Block:}|
+|Residual 1|{Num Kernels:1} {Gird:} {Block:}|{Num Kernels:1} {Gird:} {Block:}|
+|LayerNorm 2|{Num Kernels:3} {Gird:} {Block:}|{Num Kernels:1} {Gird:} {Block:}|
+|MLP|{Num Kernels:2} {Gird:} {Block:}|{Num Kernels:2} {Gird:} {Block:}|
+|Residual 2|{Num Kernels:1} {Gird:} {Block:}|{Num Kernels:1} {Gird:} {Block:}|
 
 Kernel launch is where CUDA assigns computation tasks to the GPU. The number of kernels and the size of blocks and grids can produce profound impact on system performance. Ideally, each kernel should have enough blocks and threads so that it doesn’t under utilize the compute resources. On the other hand, too many blocks, threads or kernel launches themselves will accumulate overheads and severely hurt the overall performance. In this section, we will see how the two implementations differ and why they differ. In later sections, we will discuss how these differences impact the performance
 
