@@ -182,10 +182,10 @@ This piece of code is looping over batch size and number of heads. There are two
 
 |  | Eigen | CCCL |
 | :---- | :---- | :---- |
-| min | 1 | 16 |
-| max | 3144 | 1536 |
-| mean | 3 | 159 |
-| median | 4 | 320 |
+| min block | 1 | 16 |
+| max block | 3144 | 1536 |
+| mean block | 3 | 159 |
+| median block | 4 | 320 |
 | avg warp/block | 24 | 8 |
 
 Another key aspect to understand when analyzing GPU kernels is the grid size and block size. We've included the statistics for all implementations. The results clearly show the Eigen implementation tends to launch most kernels with only a handful of blocks (often single-digit), while the CCCL version consistently launches around 160 blocks on average. This difference has major implications for GPU utilization. The Eigen llm.cpp kernels are, in effect, severely underutilizing the GPU's compute resources. Our tests were conducted on an NVIDIA A100, which features 108 streaming multiprocessors (SMs). Ignoring stalls from data dependencies and assuming a single active CUDA stream, we can reason that since a block cannot span across multiple SMs, we need at least 108 blocks to fully occupy all SMs—one block per SM. Our estimation of SM utilization is:
