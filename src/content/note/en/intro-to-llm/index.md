@@ -63,8 +63,8 @@ It can also be divided into multiple sets by the way it collects data, including
 * the Checkpoint API,  
 * the Profiling API,
 
-For this detailed analysis, we utilized a lightweight custom tool: the **GPU Memory Profiler (GMPProfiler)** . This profiler was built atop the CUPTI’s stack, leveraging both the Activities API and the Range Profiling API for fine-grained tracing and performance data collection. For the purposes of this blog, we will focus exclusively on interpreting the performance data collected.
-If you’d like to explore or reproduce the tooling:
+For this detailed analysis, we utilized our custom tool: the **GPU Memory Profiler (GMPProfiler)** . This profiler was built atop the CUPTI’s stack, leveraging both the Activities API and the Range Profiling API for fine-grained tracing and performance data collection. For the purposes of this blog, we will focus exclusively on interpreting the performance data collected.
+If you’d like to explore or reproduce the tooling, we have put down the following resources:
 * Source Code: [github](https://ml-memory-profiling-group.github.io/blog_v2/note/intro-to-llm/)
 * Tutorial: [github](https://ml-memory-profiling-group.github.io/blog_v2/note/intro-to-llm/)
 
@@ -95,28 +95,28 @@ Understanding a system’s performance in isolation is challenging; it’s far m
 As we construct the roofline model for each sub-block in a GPT-2 layer, the first step is to quantify memory traffic. The table below enumerates the activation tensors (shapes and data types) produced and consumed by each sub-block;
 | SUB BLOCKS | NUM ELEMENTS | TOTAL SIZE (MB)|
 |------------|--------------|----------------|
-|Input | B * T * C | 0.75 |
-|Layer Norm | B * L * T * C | 2.25 |
-|Q, K, V | B * L * T * 3C | 6.75 |
-|SoftMAX($QK^T$) | B * L * H * T * T | 2.25 |
-|O | B * L * T * C | 2.25 |
-|Residual | B * L * T * C | 2.25 |
-|MLP1 | B * L * T * 4C | 9 |
-|MLP GeLU | B * L * T * 4C | 9 |
-|MLP2 | B * L * T * C | 2.25 |
+|Input | $B * T * C$ | 0.75 |
+|Layer Norm | $B * L * T * C$ | 2.25 |
+|Q, K, V | $B * L * T * 3C$ | 6.75 |
+|SoftMAX($QK^T$) | $B * L * H * T^2$ | 2.25 |
+|O | $B * L * T * C$ | 2.25 |
+|Residual | $B * L * T * C$ | 2.25 |
+|MLP1 | $B * L * T * 4C$ | 9 |
+|MLP GeLU | $B * L * T * 4C$ | 9 |
+|MLP2 | $B * L * T * C$ | 2.25 |
 
 Refer to the table below for a breakdown of the computations performed by each sub-block—including key operations and FLOP counts.
 | SUB BLOCKS | Operations | Total OPs|
 |------------|------------|----------|
-|LayerNorm | Element Wise - {Mean: 1x ADD} {RSTD: 1x SQRT, 1x ADD} {Norm & Scale: 1x ADD, 1x SUB, 2x MUL} | 7 * B * T * C|
-|Q, K, V | Dense GEMM: (BT x C) x (C x 3C) | 6 * B * T * $C^2$|
-|$QK^T$ | Batch & Head Wise - Dense GEMM: (T x C/H) x (C/H x T)| 2 * B * $T^2$ * C|
-|SoftMAX |Element Wise - {1x EXP, 1x ADD, 1x DIV}| 3 * B * H * $T^2$|
-|V Matmul | Dense GEMM: (T x T) x (T x C/H)| 2 * B * $T^2$ * C|
-|O | Dense GEMM: (BT x C) x (C x C) | 2 * B * T * $C^2$|
-|Residual | Element Wise - {1x ADD}| B * T * C|
-|MLP1 | Dense GEMM: (BT x C) x (C x 4C)| 8 * B * T * $C^2$|
-|MLP2 | Dense GEMM: (BT x 4C) x (4C x C)| 8 * B * T * $C^2$|
+|LayerNorm | Element Wise - {Mean: 1x ADD} {RSTD: 1x SQRT, 1x ADD} {Norm & Scale: 1x ADD, 1x SUB, 2x MUL} | $7 * B * T * C$|
+|Q, K, V | Dense GEMM: (BT x C) x (C x 3C) | $6 * B * T * C^2$|
+|$QK^T$ | Batch & Head Wise - Dense GEMM: (T x C/H) x (C/H x T)| $2 * B * T^2 * C$|
+|SoftMAX |Element Wise - {1x EXP, 1x ADD, 1x DIV}| $3 * B * H * T^2$|
+|V Matmul | Dense GEMM: (T x T) x (T x C/H)| $2 * B * T^2 * C$|
+|O | Dense GEMM: (BT x C) x (C x C) | $2 * B * T * C^2$|
+|Residual | Element Wise - {1x ADD}| $B * T * C$|
+|MLP1 | Dense GEMM: (BT x C) x (C x 4C)| $8 * B * T * C^2$|
+|MLP2 | Dense GEMM: (BT x 4C) x (4C x C)| $8 * B * T * C^2$|
 
 Using these two tables, we compute the arithmetic intensity (AI) for each sub-block, classify each as compute-bound or memory-bound, and then derive its roofline performance ceiling accordingly. The table below walks through these steps and reports the resulting roofline limits for all sub-blocks.
 |SUB BLOCKS | AI | Bound | Execution Time (us)|
