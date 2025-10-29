@@ -150,6 +150,7 @@ The table below provides a direct comparison of the kernel launch behavior of th
 Kernel launch is where CUDA assigns computation tasks to the GPU. The number of kernels and the size of blocks and grids can produce profound impact on system performance. Ideally, each kernel should have enough blocks and threads so that it doesn’t under utilize the compute resources. On the other hand, too many blocks, threads or kernel launches themselves will accumulate overheads and severely hurt the overall performance. In this section, we will see how the two implementations differ and why they differ. In later sections, we will discuss how these differences impact the performance
 
 <center>Number of Kernels In The Ranges</center>
+
 | Framework / Range         | attention | ln1 | ln2  | mlp | residual1 | residual2 |
 |----------------------------|------------|----------|-----|-----|-----|------------|
 | **Eigen**                 | 440        | 2   | 3   | 5   | 1          | 1          |
