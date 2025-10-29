@@ -76,7 +76,7 @@ To profile the specific computational blocks we are interested in, such as a sin
   GmpProfiler::getInstance()->popRange("MLP", GmpProfileType::CONCURRENT_KERNEL);
 ```
 
-GmpProfiler::getInstance()-\>pushRange/popRange is the API of our profiler that collects both traces and metrics and defines the range. GMP\_TIMED is simply a macro to use C++ chrono to get the wall clock time spent by the wrapped portion of the code and this is where the wall-clock time comes from.
+GmpProfiler::getInstance()-\>pushRange/popRange is the API of our profiler that collects both traces and metrics and defines the range. GMP\_TIMED is simply a macro to use C++ chrono to get the wall clock time spent by the wrapped portion of the code.
 
 We partitioned a transformer layer into performance-regions, as illustrated in the figure. Although our primary focus is on the two dominant, compute-heavy sections—Attention and MLP, we intentionally retained the non-compute intensive blocks. It would be interesting to understand how much they contribute to overall performance, but, as we will see, they offer interesting insights during profiling and performance analysis.
 
