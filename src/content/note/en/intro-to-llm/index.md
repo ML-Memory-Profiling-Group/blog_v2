@@ -178,7 +178,7 @@ for (int b = 0; b < B; ++b)
 
 This piece of code is looping over batch size and number of heads. There are two matrix multiplications and softmax in each iteration, which will produce quite a lot of kernels. With B=4 and NH=12, all these kernels are repeated 48 times, so no surprise so many kernels are launched. This exemplifies a pitfall of GPU programming. It is common and fine to use for loops when we write programs for CPU, but the misuse of for loops on GPU programs can heavily downgrade the performance. We will discuss the performance drop in the next section.
 
-<center>Thread Number Statistics</center>
+<center>Grid and Block Statistics</center>
 
 |  | Eigen | CCCL |
 | :---- | :---- | :---- |
