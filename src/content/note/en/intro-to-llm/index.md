@@ -63,7 +63,12 @@ It can also be divided into multiple sets by the way it collects data, including
 * the Checkpoint API,  
 * the Profiling API,
 
-For this blog, we built a GPU profiler on top of the Activities API and Range Profiling API to trace and profile. We won’t talk about the details about how our profiler is built, but rather we will focus on the performance data collected. In case you are interested, the profiler is available here(github\_link) and the corresponding tutorial in detail is also available here(blog\_link). Simply speaking, our profiler is able to separate code into logical blocks called “range” by wrapping the code with push and pop range functions, which defines the range we are interested in and would like to collect data from. Here is a sample code of how we wrapped and timed the range:
+For this detailed analysis, we utilized a lightweight custom tool: the **GPU Memory Profiler (GMPProfiler)** . This profiler was built atop the CUPTI’s stack, leveraging both the Activities API and the Range Profiling API for fine-grained tracing and performance data collection. For the purposes of this blog, we will focus exclusively on interpreting the performance data collected.
+If you’d like to explore or reproduce the tooling:
+* Source Code: [github](https://ml-memory-profiling-group.github.io/blog_v2/note/intro-to-llm/)
+* Tutorial: [github](https://ml-memory-profiling-group.github.io/blog_v2/note/intro-to-llm/)
+
+To profile the specific computational blocks we are interested in, such as a single GEMM operation or a complete sub-block the GMPProfiler utilizes a range-based profiling methodology. It lets you mark logical ranges by wrapping code with push/pop calls. Here is a sample code snippet illustrating how we wrapped and timed a specific range:
 
 ```cpp
   GmpProfiler::getInstance()->pushRange("MLP", GmpProfileType::CONCURRENT_KERNEL);
@@ -80,9 +85,9 @@ For our performance analysis, we will use the default, out-of-the-box parameters
 * Vocabulary Size ($V$): 50304 (padded)
 * Number of Layers ($L$): 12
 * Sequence Length ($T$): 64
-* Hidden Size ($H$): 768
-* Number of Attention Heads ($A$): 12
-* Batch Size ($B): 4
+* Hidden Size ($C$): 768
+* Number of Attention Heads ($H$): 12
+* Batch Size ($B$): 4
 
 ## Roofline Performance
 Understanding a system’s performance in isolation is challenging; it’s far more meaningful to compare against an established baseline or rigorous theoretical limits. For our analysis, we will use the Roofline Model. Its a powerful analytical framework that defines the maximum achievable performance of a given application on a specific hardware system. It works by first determining two key application characteristics: the required computational intensity (FLOPs) and the necessary memory transfers. For a given application and hardware, relates arithmetic intensity (FLOPs per byte moved) to the machine’s peak compute and peak memory bandwidth. It tells you whether a kernel is compute-bound or memory-bound, and sets a clear ceiling on the performance you can expect on that system. For a concise introduction, see the NERSC guide to the [roofline model](https://docs.nersc.gov/tools/performance/roofline/). Further references will be provided at the end of this post.
