@@ -72,15 +72,14 @@ To profile the specific computational blocks we are interested in, such as a sin
 
 ```cpp
   GmpProfiler::getInstance()->pushRange("MLP", GmpProfileType::CONCURRENT_KERNEL);
-  mlp_->Forward(ln2_y_2d_const, mlp_y_2d)
+  GMP_TIMED("MLP", mlp_->Forward(ln2_y_2d_const, mlp_y_2d));
   GmpProfiler::getInstance()->popRange("MLP", GmpProfileType::CONCURRENT_KERNEL);
 ```
 
-GmpProfiler::getInstance()-\>pushRange/popRange is the API of our profiler that collects both traces and metrics and defines the range. GMP\_TIMED is simply a macro to use C++ chrono to get the CPU time spent by the wrapped portion of the code and this is where the wall-clock time comes from.
-
-All the activities records and metrics collected will be grouped by range name and accumulated or averaged among all the kernels’ data within the range, so that we can understand how each phase of the LLM performs.
+GmpProfiler::getInstance()-\>pushRange/popRange is the API of our profiler that collects both traces and metrics and defines the range. GMP\_TIMED is simply a macro to use C++ chrono to get the wall clock time spent by the wrapped portion of the code and this is where the wall-clock time comes from.
 
 We partitioned a transformer layer into performance-regions, as illustrated in the figure. Although our primary focus is on the two dominant, compute-heavy sections—Attention and MLP, we intentionally retained the non-compute intensive blocks. It would be interesting to understand how much they contribute to overall performance, but, as we will see, they offer interesting insights during profiling and performance analysis.
+
 ![Performance Regions](CUPTI-LLM-Range.png)
 
 # Performance Analysis
@@ -156,7 +155,7 @@ Kernel launch is where CUDA assigns computation tasks to the GPU. The number of 
 | **Eigen**                 | 440        | 2   | 3   | 5   | 1          | 1          |
 | **CCCL**                  | 8          | 1   | 1   | 4   | 1          | 1          |
 
-If we compare the two implementations in forward process, it is obvious that the Eigen version launches more kernels, especially in the attention. In the CCCL version, it is implemented in a way that all the computation is fused in one global kernel. Only big ranges, like mlp and attention, will employ some helper device kernels. Whereas the kernel launches in Eigen are not explicit. In other words, the number of kernels and their grid/block sizes are dependent on the implementation of Eigen. It is not guaranteed that each assignment of Eigen will generate only one kernel, and that’s why generally the Eigen version launches more kernels than the CCCL version. This is the reason why most ranges of Eigen llm.cpp launch more kernels than the CCCL one.
+If we compare the two implementations in forward process, it is obvious that the Eigen version launches more kernels, especially in the attention. In the CCCL version, it is implemented in a way that all the computation is fused in one global kernel. Only big ranges, like mlp and attention, will employ some helper device kernels. Whereas the kernel launches in Eigen are not explicit. In other words, the number of kernels and their grid/block sizes are dependent on the implementation of Eigen. It is not guaranteed that each assignment of Eigen will generate only one kernel, and that’s why generally the Eigen version launches more kernels than the CCCL version.
 
 However, this still doesn’t explain why the Eigen version of llm.cpp shows such an enormous attention range with 440 kernel launches—far more than any other range. The primary cause lies in the inefficient use of nested for loops within the implementation.Below is a pseudo-code example illustrating how the attention module is structured in Eigen’s llm.cpp:
 
@@ -178,15 +177,15 @@ for (int b = 0; b < B; ++b)
 
 This piece of code is looping over batch size and number of heads. There are two matrix multiplications and softmax in each iteration, which will produce quite a lot of kernels. With B=4 and NH=12, all these kernels are repeated 48 times, so no surprise so many kernels are launched. This exemplifies a pitfall of GPU programming. It is common and fine to use for loops when we write programs for CPU, but the misuse of for loops on GPU programs can heavily downgrade the performance. We will discuss the performance drop in the next section.
 
-<center>Grid And Block Size Statistics</center>
+<center>Thread Number Statistics</center>
 
 |  | Eigen | CCCL |
 | :---- | :---- | :---- |
 | min | 1 | 16 |
 | max | 3144 | 1536 |
-| mean | 2.741594966 | 158.9488133 |
+| mean | 3 | 159 |
 | median | 4 | 320 |
-| avg warp/block | 23.51575188 | 8.282119391 |
+| avg warp/block | 24 | 8 |
 
 Another key aspect to understand when analyzing GPU kernels is the grid size and block size. We've included the statistics for all implementations. The results clearly show the Eigen implementation tends to launch most kernels with only a handful of blocks (often single-digit), while the CCCL version consistently launches around 160 blocks on average. This difference has major implications for GPU utilization. The Eigen llm.cpp kernels are, in effect, severely underutilizing the GPU's compute resources. Our tests were conducted on an NVIDIA A100, which features 108 streaming multiprocessors (SMs). Ignoring stalls from data dependencies and assuming a single active CUDA stream, we can reason that since a block cannot span across multiple SMs, we need at least 108 blocks to fully occupy all SMs—one block per SM. Our estimation of SM utilization is:
 
@@ -283,7 +282,7 @@ Here is the data we produced:
 
 ![][dram-throughput]  
 
-From the chart, we can find that generally the CCCL version consumes more dram throughput than the Eigen one. Previously we talked about the low grid size of the Eigen version. The low SM utilization will lead to slow issue rate of load and store instructions, causing low throughput. Remember the average grid size for Eigen implementation is 2.7. This makes most of the SM inactive, not being able to commands and leave the remaining throughput wasted. 
+From the chart, we can find that generally the CCCL version consumes more dram throughput than the Eigen one. Previously we talked about the low grid size of the Eigen version. The low SM utilization will lead to slow issue rate of load and store instructions, causing low throughput. Remember the average grid size for Eigen implementation is 3. This makes most of the SM inactive, not being able to commands and leave the remaining throughput wasted. 
 
 Another reason might be  the GPU time of the range. If we refer back to the prior section, we can find that the CCCL version takes less than 1/10 GPU time of the Eigen ones. Our equation of the throughput indicates that the denominator is the GPU time. With the same amount of dram loads and stores, the bandwidth will be multiple times higher if the time is as short as that. The reduced time of the CCCL llm.cpp indicates a better usage of dram bandwidth over leaving the bandwidth wasted for a long period of time.
 
