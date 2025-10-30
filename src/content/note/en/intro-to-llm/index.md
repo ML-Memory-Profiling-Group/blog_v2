@@ -139,43 +139,48 @@ The kernel launch is the mechanism by which CUDA assigns computation tasks to th
 The table below provides a direct comparison of the kernel launch behavior of the two implementations. Note that LLM-Eigen relies on Eigen as its backend, which translates high-level tensor operations into multiple kernel launches, whereas LLM-CCCL directly invokes CUDA kernels for each sub-block.
 |PERF-REGIONS|LLM-Eigen|LLM-CCCL|
 |----------|---------|--------|
-|LayerNorm 1|{Num Kernels:2} {Gird:} {Block:}|{Num Kernels:1} {Gird:} {Block:}|
-|Attention|{Num Kernels:440} {Gird:} {Block:}|{Num Kernels:8} {Gird:} {Block:}|
-|Residual 1|{Num Kernels:1} {Gird:} {Block:}|{Num Kernels:1} {Gird:} {Block:}|
-|LayerNorm 2|{Num Kernels:3} {Gird:} {Block:}|{Num Kernels:1} {Gird:} {Block:}|
-|MLP|{Num Kernels:2} {Gird:} {Block:}|{Num Kernels:2} {Gird:} {Block:}|
-|Residual 2|{Num Kernels:1} {Gird:} {Block:}|{Num Kernels:1} {Gird:} {Block:}|
+|LayerNorm 1|2|1|
+|Attention|440|8|
+|Residual 1|1|1|
+|LayerNorm 2|3|1|
+|MLP|5|4|
+|Residual 2|1|1|
 
-Kernel launch is where CUDA assigns computation tasks to the GPU. The number of kernels and the size of blocks and grids can produce profound impact on system performance. Ideally, each kernel should have enough blocks and threads so that it doesn’t under utilize the compute resources. On the other hand, too many blocks, threads or kernel launches themselves will accumulate overheads and severely hurt the overall performance. In this section, we will see how the two implementations differ and why they differ. In later sections, we will discuss how these differences impact the performance
+Comparing the forward pass implementations reveals a stark difference in kernel launch philosophy. It is immediately apparent that the LLM-Eigen version launches a significantly higher number of kernels, particularly within the Attention block. This discrepancy arises because the LLM-Eigen version relies on the Eigen backend, where mathematical operations are translated into a sequence of non-explicit kernel launches. In other words, the number of resulting kernels and their launch configurations (grid/block sizes) are highly dependent on Eigen's internal implementation and are not guaranteed to correspond to a single assignment. In contrast, LLM-CCCL fuses the sub-block’s work into one global kernel per major range utilizing few helper kernels as needed. Lets dig deeper into its implementation of Attention to explain the large discrepency.
 
-<center>Number of Kernels In The Ranges</center>
+LLM-Eigen version's enormous 440 kernel launches in the attention stems from the factor that how the code is structured. It relies on nested loops (over sequence, heads) combined with fine-grained tensor operations. When coupled with per statement wise kernel launch the overall kernel count just blows up. In contrast, the LLM-CCCL expresses Attention using a single basic block of code that intelligently calls cuBLAS Batched GEMM to aggregate work across batches/heads into larger batched operations. The distinction, therefore, lies in fundamental design philosophy: the Eigen approach favors simplicity of expression (using standard C++ loops and libraries), whereas the CCCL approach favors maximum hardware utilization. With a batch size ($B$) of 4 and 12 attention heads ($H$), this design choice introduces a 48x iteration difference that significantly amplifies the total number of kernel launches as observed.
 
-| Framework / Range         | attention | ln1 | ln2  | mlp | residual1 | residual2 |
-|----------------------------|------------|----------|-----|-----|-----|------------|
-| **Eigen**                 | 440        | 2   | 3   | 5   | 1          | 1          |
-| **CCCL**                  | 8          | 1   | 1   | 4   | 1          | 1          |
-
-If we compare the two implementations in forward process, it is obvious that the Eigen version launches more kernels, especially in the attention. In the CCCL version, it is implemented in a way that all the computation is fused in one global kernel. Only big ranges, like mlp and attention, will employ some helper device kernels. Whereas the kernel launches in Eigen are not explicit. In other words, the number of kernels and their grid/block sizes are dependent on the implementation of Eigen. It is not guaranteed that each assignment of Eigen will generate only one kernel, and that’s why generally the Eigen version launches more kernels than the CCCL version.
-
-However, this still doesn’t explain why the Eigen version of llm.cpp shows such an enormous attention range with 440 kernel launches—far more than any other range. The primary cause lies in the inefficient use of nested for loops within the implementation.Below is a pseudo-code example illustrating how the attention module is structured in Eigen’s llm.cpp:
+Below is the code snippet illustrating how the attention module is structured for both the versions:
 
 ```cpp
+// LLM-Eigen Attention Implementation
 for (int b = 0; b < B; ++b)  
 {  
     for (int h = 0; h < NH; ++h)  
     {  
-        // Calculate Q K V
-
         // Calculate QK^T
+        nn::MatMul::Forward(q2d, k2d, preatt2d, factor);
 
         // softmax
+        nn::Softmax::Forward(preatt2d_tensor, preatt_softmax2d_tensor);
 
-        // att * V  
+        // att * V
+        nn::MatMul::Forward(preatt_softmax2d, v2d_const, att2d);
     }  
-}  
-```
+}
 
-This piece of code is looping over batch size and number of heads. There are two matrix multiplications and softmax in each iteration, which will produce quite a lot of kernels. With B=4 and NH=12, all these kernels are repeated 48 times, so no surprise so many kernels are launched. This exemplifies a pitfall of GPU programming. It is common and fine to use for loops when we write programs for CPU, but the misuse of for loops on GPU programs can heavily downgrade the performance. We will discuss the performance drop in the next section.
+// LLM-CCCL Attention Implementation
+
+// Calculate QK^T
+cublasCheck(cublasSgemmStridedBatched(cublas_handle, CUBLAS_OP_T, CUBLAS_OP_N, T, T, HS, &alpha, k, HS, T * HS, q, HS, T * HS, &beta, preatt, T, T * T, B * NH));
+
+// softmax
+softmax_forward_kernel5<<<grid_size, softmax_block_size>>>(att, scale, preatt, B * NH, T);
+
+// att * V
+cublasCheck(cublasSgemmStridedBatched(cublas_handle, CUBLAS_OP_N, CUBLAS_OP_N, HS, T, T, &alpha, v, HS, T * HS, att, T, T * T, &beta, vaccum, HS, T * HS, B * NH));
+
+```
 
 <center>Grid and Block Statistics</center>
 
