@@ -78,9 +78,12 @@ To profile the specific computational blocks we are interested in, such as a sin
 To avoid profiling overhead during normal runs, we provide both a compile-time flag and a runtime switch to enable/disable the profiler. When statically disabled, the application executes with no CUPTI overhead. We also expose a lightweight timing macro, GMP_TIMED, which uses C++ std::chrono to measure wall-clock time for any wrapped code region. This offers a quick way to gauge performance for a given range without invoking CUPTI. We will compare this basic wall-clock measurement with the more detailed, hardware-recorded time retrieved by CUPTI to gain insights into system-level overheads that affect overall performance.
 
 We partitioned a transformer layer into performance-regions, as illustrated in the figure. Although our primary focus is on the two dominant, compute-heavy sections—Attention and MLP, we intentionally retained the non-compute intensive blocks. It would be interesting to understand how much they contribute to overall performance, but, as we will see, they offer interesting insights during profiling and performance analysis.
-<p align="center">
-  <img src="CUPTI-LLM-Range.png" width="10%">
-</p>
+
+<div class="small-image">
+
+![CUPTI LLM Range](CUPTI-LLM-Range.png)
+
+</div>
 
 # Performance Analysis
 For our performance analysis, we will use the default, out-of-the-box parameters provided in the LLM repositories.
