@@ -189,6 +189,9 @@ Another key aspect to understand when analyzing GPU kernels is the grid and bloc
 
 The results clearly show a dramatic difference in launch configuration granularity. The LLM-Eigen implementation tends to launch the vast majority of its kernels with only a handful of blocks (often single-digit count), whereas the CCCL implementation launches the majority of kernels with >= 256 blocks. This has significant implications for GPU compute utilization. On an A100 with 108 SMs, small-grid kernels from the Eigen launching kernels with only a few blocks means that most SMs remain idle leading to severe underutilization of compute resources. 
 
+We define the SM Utilization of a GPU as: $$ \frac{\max(4, BlockSize/WarpSize)}{4} \times 100\%$$
+and GPU Utilization as: $$ \frac{\max(NumSM, GridSize)}{NumSM} \times 100\% \times SM Utilization $$
+
 <center>Grid and Block Statistics</center>
 
 |  | Eigen | CCCL |
