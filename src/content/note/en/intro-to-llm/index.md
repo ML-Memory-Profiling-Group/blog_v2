@@ -187,13 +187,9 @@ Another key aspect to understand when analyzing GPU kernels is the grid and bloc
 
 ![Grid and Block Configuration](grid-block-stats.png)
 
-The results clearly show a dramatic difference in launch configuration granularity. The LLM-Eigen implementation tends to launch the vast majority of its kernels with only a handful of blocks (often single-digit count), whereas the CCCL implementation launches the majority of kernels with >= 256 blocks. This has significant implications for GPU compute utilization. On an A100 with 108 SMs, small-grid kernels from the Eigen launching kernels with only a few blocks means that most SMs remain idle leading to severe underutilization of compute resources. 
+The results clearly show a dramatic difference in launch configuration granularity. The LLM-Eigen implementation tends to launch the vast majority of its kernels with only a handful of blocks (often single-digit count), whereas the CCCL implementation launches the majority of kernels with >= 256 blocks. The following table shows this glaring discrepency in another light:
 
-We define the SM Utilization of a GPU as: $$ \frac{\max(4, BlockSize/WarpSize)}{4} \times 100\%$$
-and GPU Utilization as: $$ \frac{\max(NumSM, GridSize)}{NumSM} \times 100\% \times SM Utilization $$
-
-<center>Grid and Block Statistics</center>
-
+<center>Grid Size Statistics</center>
 |  | Eigen | CCCL |
 | :---- | :---- | :---- |
 | min block | 1 | 16 |
@@ -202,9 +198,13 @@ and GPU Utilization as: $$ \frac{\max(NumSM, GridSize)}{NumSM} \times 100\% \tim
 | median block | 4 | 320 |
 | avg warp/block | 24 | 8 |
 
-We've included the statistics for all implementations. The results clearly show the Eigen implementation tends to launch most kernels with only a handful of blocks (often single-digit), while the CCCL version consistently launches around 160 blocks on average. This difference has major implications for GPU utilization. The Eigen llm.cpp kernels are, in effect, severely underutilizing the GPU's compute resources. Our tests were conducted on an NVIDIA A100, which features 108 streaming multiprocessors (SMs). Ignoring stalls from data dependencies and assuming a single active CUDA stream, we can reason that since a block cannot span across multiple SMs, we need at least 108 blocks to fully occupy all SMs—one block per SM. Our estimation of SM utilization is:
+This has significant implications for GPU compute utilization. On an A100 with 108 SMs, small-grid kernels from the Eigen launching kernels with only a few blocks means that most SMs remain idle leading to severe underutilization of compute resources. 
 
-$$SmUtilization = \frac{\max(DeviceSmNum, BlockSize)}{DeviceSmNum} \times 100\%$$
+We define the SM Utilization of a GPU as: $$ \frac{\max(4, BlockSize/WarpSize)}{4} $$
+
+and GPU Utilization as: $$ \frac{\max(NumSM, GridSize)}{NumSM} \times SM Utilization $$
+
+
 
 This formula is based on the assumption of single device and no parallel kernel execution. The Eigen llm.cpp forward kernels only launch about 2.7 blocks per launch on average, which means that roughly 2% of the SMs are actually being used—an astonishingly low figure for such a powerful GPU. It’s worth noting that we assume the scheduler assigns blocks to idle SMs first, rather than sharing SMs among active blocks, since this policy maximizes utilization. NVIDIA’s exact block scheduling policy isn’t publicly documented, so this conclusion is based on empirical observation and reasonable inference. Regardless of the precise scheduling details, the number of blocks required for full utilization must be at least 108, so our conclusion about underutilization remains valid.
 
