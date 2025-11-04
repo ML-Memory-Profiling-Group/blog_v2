@@ -194,7 +194,7 @@ The results clearly show a dramatic difference in launch configuration granulari
 
 <center>Grid Size Statistics</center>
 
-|  | Eigen | CCCL |
+|  | LLM-Eigen | LLM-CCCL |
 | :---- | :---- | :---- |
 | min block | 1 | 16 |
 | max block | 3144 | 1536 |
@@ -209,6 +209,10 @@ We define the SM Utilization of a GPU as: $$ \frac{\max(4, BlockSize/WarpSize)}{
 and GPU Utilization as: $$ \frac{\max(NumSM, GridSize)}{NumSM} \times SM Utilization $$
 
 Since each SM is subdivided into partitions (typically four sub-partitions in Ampere and Hopper), a minimum of four warps is generally required to maintain compute efficiency within a single SM. Similarly, to ensure all SMs are engaged across the entire GPU, the number of launched blocks should be at least equal to the number of SMs on the device. The formula above is a very simplified model of warp scheduling and SM occupancy, intentionally omitting many architectural complexities (e.g., register file pressure, shared-memory, ILP limits, warp divergence) to keep this blog focused and practical. In reality, optimal occupancy depends on the interaction of these factors, not just raw counts of blocks and warps. Achieving the absolute maximum FLOPs often requires the GPU utilization metric to be as close to $1.0$ (or 100%) as possible. It is critical to recognize that if the kernel is not compute-bound, driving utilization to ~1.0 may not increase performance and often lead to wasted energy.
+
+The block-size distribution shows that most kernels are launched with large blocks, providing enough warps per block to keep the schedulers (and SM) busy. Given the simplified utilization model above, the primary factor determining performance then boils down to the grid size (the number of blocks). The GPU utilization chart below validates our earlier deduction: LLM-Eigen spends most of its time below 50% utilization, whereas in LLM-CCCL only about one quarter of kernels fall below 50%. This profound difference in hardware usage directly materializes as performance disparity, which we will now investigate in terms of real training time impacts.
+
+![GPU Utilization](llm-gpu-utilization.png)
 
 ## Wall Clock Time and GPU execution Time
 
