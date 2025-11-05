@@ -123,18 +123,23 @@ Refer to the table below for a breakdown of the computations performed by each s
 |MLP1 | Dense GEMM: (BT x C) x (C x 4C)| $8 * B * T * C^2$|
 |MLP2 | Dense GEMM: (BT x 4C) x (4C x C)| $8 * B * T * C^2$|
 
-Using these two tables, we compute the arithmetic intensity (AI) for each sub-block, classify each as compute-bound or memory-bound, and then derive its roofline performance ceiling accordingly. The table below walks through these steps and reports the resulting roofline limits for all sub-blocks.
-|SUB BLOCKS | AI | Bound | Execution Time (us)|
-|-----------|----|-------|--------------------|
-|LayerNorm | < 1 | Memory | |
-|Q, K, V | > 80 | Compute | |
-|$QK^T$ | > 40 | Compute | |
-|SoftMAX | < 1 | Memory | |
-|V Matmul | > 40 | Compute | |
-|O | > 300 | Compute | |
-|Residual | < 0.1 | Memory | |
-|MLP1 | > 300 | Compute | |
-|MLP2 | > 300 | Compute | |
+Using these two tables, we compute the arithmetic intensity (AI) for each sub-block, classify each as compute-bound or memory-bound, and then derive its roofline performance ceiling accordingly. On A100 SXM4 we use the folloiwng parameters of the device:
+* FP32 FLOPS : 19.5 TFOPS
+* TF32 FLOPS : 156 TFLOPS
+* HBM2E BW : 1555 GB/s
+
+As the compute bound GEMM operations can use Tensor cores, we provide the minimum execution time using TF32 and maximum time using FP32 FLOPS. The table below walks through these steps and reports the resulting roofline limits for all sub-blocks.
+|SUB BLOCKS | AI | Bound | Min Time (TF32) (us)| Max Time (FP32) (us)
+|-----------|----|-------|--------------------|-----------------|
+|LayerNorm | < 1 | Memory | 1.01 | 1.01 |
+|Q, K, V | > 80 | Compute | 5.81 | 46.5 |
+|$QK^T$ | > 40 | Compute | 0.16 | 1.29 |
+|SoftMAX | < 1 | Memory | 1.01 | 1.01 |
+|V Matmul | > 40 | Compute | 0.16 | 1.29 |
+|O | > 300 | Compute | 1.94 | 15.5 |
+|Residual | < 0.1 | Memory |  0.13 | 0.13 |
+|MLP1 | > 300 | Compute |  7.74 | 61.9 |
+|MLP2 | > 300 | Compute |  7.74 | 61.9 |
 
 With our definitive Roofline Performance figures now established, we transition from theoretical limits to real-world measurement. We will examine the actual performance attained by both the LLM implemntations compare it against these theoretical ceilings to understand how closely each implementation approaches its roofline—and where performance gaps emerge.
 
@@ -204,9 +209,9 @@ The results clearly show a dramatic difference in launch configuration granulari
 
 This has significant implications for GPU compute utilization. On an A100 with 108 SMs, small-grid kernels from the Eigen launching kernels with only a few blocks means that most SMs remain idle leading to severe underutilization of compute resources. 
 
-We define the SM Utilization of a GPU as: $$ \frac{\max(4, BlockSize/WarpSize)}{4} $$
+We define the SM Utilization of a GPU as: $$ \frac{\min(4, BlockSize/WarpSize)}{4} $$
 
-and GPU Utilization as: $$ \frac{\max(NumSM, GridSize)}{NumSM} \times SM Utilization $$
+and GPU Utilization as: $$ \frac{\min(NumSM, GridSize)}{NumSM} \times SM Utilization $$
 
 Since each SM is subdivided into partitions (typically four sub-partitions in Ampere and Hopper), a minimum of four warps is generally required to maintain compute efficiency within a single SM. Similarly, to ensure all SMs are engaged across the entire GPU, the number of launched blocks should be at least equal to the number of SMs on the device. The formula above is a very simplified model of warp scheduling and SM occupancy, intentionally omitting many architectural complexities (e.g., register file pressure, shared-memory, ILP limits, warp divergence) to keep this blog focused and practical. In reality, optimal occupancy depends on the interaction of these factors, not just raw counts of blocks and warps. Achieving the absolute maximum FLOPs often requires the GPU utilization metric to be as close to $1.0$ (or 100%) as possible. It is critical to recognize that if the kernel is not compute-bound, driving utilization to ~1.0 may not increase performance and often lead to wasted energy.
 
@@ -214,14 +219,28 @@ The block-size distribution shows that most kernels are launched with large bloc
 
 ![GPU Utilization](llm-gpu-utilization.png)
 
-## Wall Clock Time and GPU execution Time
+## Training Time
+Measuring layer training time has two perspectives:
+* GPU Time: This is the duration measured while the kernel(s) are actively executing on the GPU hardware. In our case here it is collected from hardware counters per kernel through CUPTI. For a range, we add the gpu\_\_time\_duration.max of all the kernels within it.
+* Overall Time (Wall-Clock Time): This is the end-to-end time experienced by the user when the training process is executed from the CPU host. We use C++ std::chrono::high_resolution_clock::now() followed by a cudaDeviceSynchronize() to wrap the code snippet. It is a comprehensive metric comprising:
+  * The GPU execution time,
+  * The CPU execution time (host-side logic, data preparation like makespan, makeMatrix, synchronized cuda memory copy/memset, etc.), and
+  * Various overheads, primarily kernel launch latency and synchronization cost.
 
-Time consumption is one of the key metrics of any type of program. In this blog we will focus on the wall clock time and the GPU time of the two implementations.
+Note that by default the kernel launch is asynchronous and launching a kernel will only push it into a queue but not execute it. As we perform device synchorization in the C++ marcro, our wall clock time includes the GPU execution time. Another popular way of measuring this time would be through [cudaEventRecord](https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html) mechanism.
 
-* The GPU execution time is the time GPU takes to finish all the calculation. It is collected from hardware counters per kernel through CUPTI. For a range, we add the gpu\_\_time\_duration.max of all the kernels within it.
-* The wall clock time is the time from the start to the end of executing a piece of code on the CPU. We use C++ std::chrono::high\_resolution\_clock::now() to wrap the code snippet and get the duration through subtracting the two timestamps. This time is measured on the CPU side, so it will include all the time spent by the code wrapped, including GPU execution time, launch overhead, any housekeeping operations like makespan, makeMatrix, synchronized cuda memory copy/memset, etc.
+The table below shows the GPU execution time alongwith the roofline as calculated above. All values are in **micro seconds (us)**
+|PERF-REGIONS|Roofline-Min|Roofline-Max|LLM-Eigen|LLM-CCCL|CCCL Speedup|
+|------------|------------|------------|---------|--------|------------|
+|LayerNorm 1| 1.01 | 1.01 | 569.7 | 15.5 | 36x |
+|Attention| 9.08 | 65.5 | 2882.5 | 60.5 | 48x |
+|Residual 1| 0.13 | 0.13 | 3.7 | 3.8 | 0.98x |
+|LayerNorm 2| 1.01 | 1.01 | 569.7 | 15.5 | 36x |
+|MLP| 15.5 | 124| 551.2 | 49.3 | 11x |
+|Residual 2| 0.13 | 0.13 | 3.9 | 4.2 | 0.93 |
 
-Note that by default the kernel launch is asynchronous and launching a kernel will only push it into a queue but not execute it. With CUPTI range profiling enabled, all kernels will be executed synchronously. That's why our wall clock time includes the GPU execution time.
+The numbers reveal very interesting performance characteritics:
+
 
 Below are the wall clock time(in microseconds) and GPU time(in nanoseconds) of all the ranges and their ratio. A huge overall performance gap between Eigen and CCCL implementation are presented and many factors contribute to these gaps.
 
