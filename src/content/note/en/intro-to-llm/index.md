@@ -234,13 +234,28 @@ The table below shows the GPU execution time alongwith the roofline as calculate
 |------------|------------|------------|---------|--------|------------|
 |LayerNorm 1| 1.01 | 1.01 | 569.7 | 15.5 | 36x |
 |Attention| 9.08 | 65.5 | 2882.5 | 60.5 | 48x |
-|Residual 1| 0.13 | 0.13 | 3.7 | 3.8 | 0.98x |
+|Residual 1| 0.13 | 0.13 | 3.7 | 3.8 | 1x |
 |LayerNorm 2| 1.01 | 1.01 | 569.7 | 15.5 | 36x |
 |MLP| 15.5 | 124| 551.2 | 49.3 | 11x |
-|Residual 2| 0.13 | 0.13 | 3.9 | 4.2 | 0.93 |
+|Residual 2| 0.13 | 0.13 | 3.9 | 4.2 | 1x |
 
-The numbers reveal very interesting performance characteritics:
+The results of our comparative analysis reveal several interesting and crucial performance characteristics:
+1. The Gap Between Theory and Reality: While the Roofline Model clearly provides the theoretical performance bounds, real-world implementations are often significantly far from reaching that limit. Closing this gap requires targeted profiling and optimization.
+2. Compute Efficiency in CCCL: The Attention and MLP blocks (backed by cuBLAS) achieve high compute utilization.
+3. Performance Dominance of CCCL: With the exception of the Residual block, the CCCL implementation consistently outperforms the Eigen implementation by a huge margin across the entire LLM layer.
+4. Eigen's Bottleneck: As anticipated, the LLM-Eigen implementation suffers from extremely low performance. This is a direct consequence of its abysmally low GPU utilization due to small grid size.
 
+Now we analyze the overall timing (in micro-seconds) of the performance regions as presented in the table here. The GPU execution time is provided in paranthesis for ease of reference:
+|PERF-REGIONS|LLM-Eigen-|LLM-CCCL|CCCL Speedup|
+|------------|----------|--------|------------|
+|LayerNorm 1| 580 (570) | 30 (16) |  19x (36x) |
+|Attention| 5817 (2880) | 101 (61) |  58x (48x) |
+|Residual 1| 18 (4) | 17 (4) |  1x (1x) |
+|LayerNorm 2| 581 (570) | 30 (16) |  19x (36x) |
+|MLP| 1003 (551) | 86 (49) |  12x (11x) |
+|Residual 2| 19 (4) | 18 (4) |  1x (1x) |
+
+The results make it clear that the non-GPU portion of runtime is significant and cannot be ignored. To reach peak performance, system-level optimization spanning CPU, GPU, memory, storage, and network/data pipelines is often just as important as kernel efficiency. Focusing on the Attention block, Eigen’s many small kernel launches (versus CCCL’s single cuBLAS batched GEMM) amplify overheads, widening the gap from 48x on GPU time to 58x on overall wall-clock time.
 
 Below are the wall clock time(in microseconds) and GPU time(in nanoseconds) of all the ranges and their ratio. A huge overall performance gap between Eigen and CCCL implementation are presented and many factors contribute to these gaps.
 
