@@ -257,9 +257,15 @@ Now we analyze the overall timing (in micro-seconds) of the performance regions 
 
 The results make it clear that the non-GPU portion of runtime is significant and cannot be ignored. To reach peak performance, system-level optimization spanning CPU, GPU, memory, storage, and network/data pipelines is often just as important as kernel efficiency. Focusing on the Attention block, Eigen’s many small kernel launches (versus CCCL’s single cuBLAS batched GEMM) amplify overheads, widening the gap from 48x on GPU time to 58x on overall wall-clock time.
 
-Below are the wall clock time(in microseconds) and GPU time(in nanoseconds) of all the ranges and their ratio. A huge overall performance gap between Eigen and CCCL implementation are presented and many factors contribute to these gaps.
+The chart below shows how execution time is distributed across major performance regions.
 
 ![Training Time Distribution](time-distribution.png)
+
+As anticipated, the Attention block consumes the largest fraction of the total time, closely followed by the MLP block. Even the memory-bound LayerNorm (memory bound) operation contributes a non-negligible amount of time. For the Eigen implementation, Attention dominates: it consumes ~63% of GPU time, and—once kernel-launch overheads are included ~73% of overall time. LLM-CCCL's highly optimized Attention is far more efficient, consuming only about 35% to 40% of the overall execution time. One highly interesting point we must bring forth is the comparison against the Roofline Model. The model predicted that the MLP block should have a greater contribution to total time than the Attention block. However, for both implementations, the reality we measured shows that Attention consistently takes more time than MLP. We have not fully isolated the root cause, but we think Attention kernel launches, associated launch/synchronization overheads, and less favorable data movement, which together inflate Attention’s cost relative to the MLP.
+
+Next, we take a deeper look at the memory behavior of the two implementations by analyzing metrics such as instruction mix, cache behavior, and memory access patterns.
+
+
 
 Let's start from the GPU time. Without considering CPU side, the gap between the two versions is still enormous. The biggest contributors to the GPU time are the attention and mlp ranges, which is as expected because according to the roofline calculation, these two ranges did most FLOPs and MOPs. However, if we compare the ratio of GPU time between the two versions, we can observe that the attention range of the Eigen llm.cpp significantly outweighs the mlp range, whereas in CCCL llm.cpp, these ranges are relatively equivalent. According to the prior section, we know that huge amounts of small kernels are launched within the attention of Eigen llm.cpp. This causes several problems:
 * Reduced locality on L1 because L1 is flushed between kernels.
