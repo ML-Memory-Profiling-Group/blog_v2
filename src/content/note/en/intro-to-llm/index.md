@@ -133,13 +133,13 @@ As the compute bound GEMM operations can use Tensor cores, we provide the minimu
 |-----------|----|-------|--------------------|-----------------|
 |LayerNorm | < 1 | Memory | 1.01 | 1.01 |
 |Q, K, V | > 80 | Compute | 5.81 | 46.5 |
-|$QK^T$ | > 40 | Compute | 0.16 | 1.29 |
+|$QK^T$ | > 10 | Compute | 0.16 | 1.29 |
 |SoftMAX | < 1 | Memory | 1.01 | 1.01 |
-|V Matmul | > 40 | Compute | 0.16 | 1.29 |
-|O | > 300 | Compute | 1.94 | 15.5 |
-|Residual | < 0.1 | Memory |  0.13 | 0.13 |
-|MLP1 | > 300 | Compute |  7.74 | 61.9 |
-|MLP2 | > 300 | Compute |  7.74 | 61.9 |
+|V Matmul | > 10 | Compute | 0.16 | 1.29 |
+|O | > 76 | Compute | 1.94 | 15.5 |
+|Residual | < 0.1 | Memory |  1.52 | 1.52 |
+|MLP1 | > 90 | Compute |  7.74 | 61.9 |
+|MLP2 | > 90 | Compute |  7.74 | 61.9 |
 
 With our definitive Roofline Performance figures now established, we transition from theoretical limits to real-world measurement. We will examine the actual performance attained by both the LLM implemntations compare it against these theoretical ceilings to understand how closely each implementation approaches its roofline—and where performance gaps emerge.
 
@@ -234,10 +234,10 @@ The table below shows the GPU execution time alongwith the roofline as calculate
 |------------|------------|------------|---------|--------|------------|
 |LayerNorm 1| 1.01 | 1.01 | 569.7 | 15.5 | 36x |
 |Attention| 9.08 | 65.5 | 2882.5 | 60.5 | 48x |
-|Residual 1| 0.13 | 0.13 | 3.7 | 3.8 | 1x |
+|Residual 1| 1.52 | 1.52 | 3.7 | 3.8 | 1x |
 |LayerNorm 2| 1.01 | 1.01 | 569.7 | 15.5 | 36x |
 |MLP| 15.5 | 124| 551.2 | 49.3 | 11x |
-|Residual 2| 0.13 | 0.13 | 3.9 | 4.2 | 1x |
+|Residual 2| 1.52 | 1.52 | 3.9 | 4.2 | 1x |
 
 The results of our comparative analysis reveal several interesting and crucial performance characteristics:
 1. The Gap Between Theory and Reality: While the Roofline Model clearly provides the theoretical performance bounds, real-world implementations are often significantly far from reaching that limit. Closing this gap requires targeted profiling and optimization.
@@ -281,7 +281,7 @@ SASS (Streaming Assembler) is the low-level assembly language executed by NVIDIA
 * smsp\_\_sass\_data\_bytes\_mem\_global\_op\_ld.sum represents the actual data loaded by the instructions.
 * There are analogous store instructions.
 
-As expected there are 2x load instructions and bytes compared to stores. Its interesting to notice a significant difference in instruction counts despite both implementations loading and storing the exact same total amount of data, the LLM-Eigen version executes only approximately one-quarter of the instructions compared to the LLM-CCCL version. This efficiency is achieved because the Eigen backend employs vectorized loads for contiguous memory elements. This optimization means that each single global load instruction retrieves, for instance, four floating-point elements instead of just one, dramatically reducing the total instruction count required to move the same volume of data. More background on advantages of Vectorized Memory Access is presented in ![CUDA profile tip](https://developer.nvidia.com/blog/cuda-pro-tip-increase-performance-with-vectorized-memory-access/).
+As expected there are 2x load instructions and bytes compared to stores. Its interesting to notice a significant difference in instruction counts despite both implementations loading and storing the exact same total amount of data, the LLM-Eigen version executes only approximately one-quarter of the instructions compared to the LLM-CCCL version. This efficiency is achieved because the Eigen backend employs vectorized loads for contiguous memory elements. This optimization means that each single global load instruction retrieves, for instance, four floating-point elements instead of just one, dramatically reducing the total instruction count required to move the same volume of data. More background on advantages of Vectorized Memory Access is presented in [CUDA profile tip](https://developer.nvidia.com/blog/cuda-pro-tip-increase-performance-with-vectorized-memory-access/).
 
 ### L1, L2 and HBM accesses
 
