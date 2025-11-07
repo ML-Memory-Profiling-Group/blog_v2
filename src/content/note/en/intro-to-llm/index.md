@@ -265,61 +265,25 @@ As anticipated, the Attention block consumes the largest fraction of the total t
 
 Next, we take a deeper look at the memory behavior of the two implementations by analyzing metrics such as instruction mix, cache behavior, and memory access patterns.
 
+## Memory Performance Profile
+### SASS Instructions
+SASS (Streaming Assembler) is the low-level assembly language executed by NVIDIA GPUs, the final compiled form of CUDA kernels. While CUPTI can collect a broad range of SASS metrics, for the purpose of this memory-focused blog, we will concentrate specifically on the global load/store instructions and the corresponding bytes read from and written to global memory as this provides the direct information about the data traffic imposed on the High Bandwidth Memory (HBM) subsystem by each LLM implementation. Before we deep dive here is an example sample from the Residual performance region chosen for simplicity of analysis as it performs a $A = B + C$ operation on vectors.
 
-
-Let's start from the GPU time. Without considering CPU side, the gap between the two versions is still enormous. The biggest contributors to the GPU time are the attention and mlp ranges, which is as expected because according to the roofline calculation, these two ranges did most FLOPs and MOPs. However, if we compare the ratio of GPU time between the two versions, we can observe that the attention range of the Eigen llm.cpp significantly outweighs the mlp range, whereas in CCCL llm.cpp, these ranges are relatively equivalent. According to the prior section, we know that huge amounts of small kernels are launched within the attention of Eigen llm.cpp. This causes several problems:
-* Reduced locality on L1 because L1 is flushed between kernels.
-* Poor latency hiding due to the shortage of blocks and short kernels.
-* Low SM utilization because of the lack of blocks to be assigned to SMs.
-
-Another noteworthy point is the developer of the CCCL llm.cpp implementation applied several optimizations to improve cache efficiency — for instance, using cache streaming to allow one-time data to bypass the cache, and employing reverse iteration to increase cache hits at the tail of arrays. In contrast, the Eigen version lacks such low-level optimizations, at least from the user side. As a result, the CCCL version achieves higher cache hit rates and fewer dram accesses, which directly contributes to its shorter execution time.
-
-![][forward-wallclock-time]![][forward-wallclock-time-ratio]
-
-On the other side, the gap of the wall clock time enlarges, suggesting that there are more factors outside GPU that further drops down the overall performance. We suggest that the additional dropdown is probably dorminated by launch overhead. To explain the difference, we conducted an experiment using a simple helloworld CUDA program. In this program, we launched 440 kernels with minimum FLOPS and MFLOPS and the average wall clock time we got is 12.4 microseconds per kernel, which should mostly be launch overhead. In comparison, we calculated the average gaps between kernels to estimate the launch overheads of the two llm.cpp using this formula:
-
-$$AvgLaunchOverhead = \frac{RangeWallClockTime - GpuExecutionTime}{KernelNum}$$
-
-The result is presented here:
-
-<center>Average Gap Between Wall Clock Time And GPU Time</center>
-
-| Layer         | Eigen Avg Gap (µs) | CCCL Avg Gap (µs) |
-|----------------|--------------------------------|--------------------------------|
-| ln1            | 5.136                          | 14.544                         |
-| attention      | 6.669                          | 5.053                          |
-| residual1      | 14.288                         | 13.128                         |
-| ln2            | 3.747                          | 14.064                         |
-| feed_forward   | 90.354                         | 9.172                          |
-| residual2      | 15.064                         | 13.840                         |
-
-We can see that the avg gap mostly lies between 3~15µs, which matches the maginitude of approximate launch overheads from helloworld. This indicates that the extra wall clock time of the two llm.cpp is mostly launch overheads. Other than this, there are other minor possibilities that can contribute to the wall clock time:
-* Allocation and release of resources, e.g. registers and shared memory, especially for the attention of Eigen.
-* Synchronized Host-to-Device or Device-to-Host memory transfer or memset. 
-* Execution time of CPU instructions.
-* Overheads for library to choose appropriate kernels.
-
-## SASS Instructions
-
-SASS (Streaming Assembler) is the low-level assembly language executed by NVIDIA GPUs. It's the final compiled form of CUDA kernels. CUPTI allows us to collect all kinds of SASS, but in this blog, we will focus on the global load/store instructions and the bytes it reads/writes. Here is the sample SASS instruction data of the residual range:
-
-| metrics | Eigen | CCCL |
+| Metric | LLM-Eigen | LLM-CCCL |
 | :---- | :---- | :---- |
-| smsp\_\_sass\_data\_bytes\_mem\_global\_op\_ld.sum | 1572864 | 1572864 |
-| smsp\_\_sass\_data\_bytes\_mem\_global\_op\_st.sum | 786432 | 786432 |
-| smsp\_\_sass\_inst\_executed\_op\_global\_ld.sum | 3072 | 12288 |
-| smsp\_\_sass\_inst\_executed\_op\_global\_st.sum | 1536 | 6144 |
+| smsp\_\_sass\_data\_bytes\_mem\_global\_op\_ld.sum | 1,572,864 | 1,572,864 |
+| smsp\_\_sass\_data\_bytes\_mem\_global\_op\_st.sum | 786,432 | 786,432 |
+| smsp\_\_sass\_inst\_executed\_op\_global\_ld.sum | 3,072 | 12,288 |
+| smsp\_\_sass\_inst\_executed\_op\_global\_st.sum | 1,536 | 6,144 |
 
-* smsp\_\_sass\_data\_bytes\_mem\_global\_op\_ld.sum is the total number of global load **warp** instructions issued. Note that this doesn't include atomic or shared loads,which are collected in other metrics. 
-* smsp\_\_sass\_data\_bytes\_mem\_global\_op\_ld.sum represents the actual data loaded by the SASS instructions. 
+* The metrics are reported on a **warp** basis.
+* smsp\_\_sass\_data\_bytes\_mem\_global\_op\_ld.sum is the total number of global load instructions issued. Note that this doesn't include atomic loads,which are collected in other metrics. 
+* smsp\_\_sass\_data\_bytes\_mem\_global\_op\_ld.sum represents the actual data loaded by the instructions.
+* There are analogous store instructions.
 
-Store instructions are similar to the load instructions. We choose residual as an example because it is relatively straightforward and only contains an element-wise add operation. The GPU should load two input matrices and store the output matrix. That's why there are 2x load instructions and bytes compared to stores. You may also notice that even though both implementations load/store the same amount of data, the Eigen version executed only ¼ instructions of the CCCL version. This is because the Eigen version employs vectorized loads for contiguous elements so that each global load will load 4 floats instead of 1 float. We can calculate it through following this formula:
+As expected there are 2x load instructions and bytes compared to stores. Its interesting to notice a significant difference in instruction counts despite both implementations loading and storing the exact same total amount of data, the LLM-Eigen version executes only approximately one-quarter of the instructions compared to the LLM-CCCL version. This efficiency is achieved because the Eigen backend employs vectorized loads for contiguous memory elements. This optimization means that each single global load instruction retrieves, for instance, four floating-point elements instead of just one, dramatically reducing the total instruction count required to move the same volume of data. More background on advantages of Vectorized Memory Access is presented in ![CUDA profile tip](https://developer.nvidia.com/blog/cuda-pro-tip-increase-performance-with-vectorized-memory-access/).
 
-$$AvgFloatsLoadedPerThread = \frac{SassBytesLoaded}{LoadSassInstIssued \times 32 \times 4}$$
-
-We divide 32 because the issued SASS instructions are counted in warps. The 4 comes from 4 bytes per float. The result of the Eigen version is 4 floats per load. For the CCCL version, this number is reduced to 1 float per load. The vectorization is one optimization Eigen implicitly does for loads and stores automatically, which can reduce redundant instructions and issue overheads.
-
-## L1, L2 and dram accesses
+### L1, L2 and HBM accesses
 
 When SASS loads and stores are executed in the thread, they will be coalesced with other instructions executed by other threads within the warp and sent to L1. If the request missed,L1 will forward the request to L2. If it still misses, L2 will send requests to the dram in sectors. Here are the metrics we are interested and we will still show the residual range as an example:  
 
@@ -333,7 +297,7 @@ When SASS loads and stores are executed in the thread, they will be coalesced wi
 
 In general, from L1 to L2 to dram, the sector metrics should gradually reduce. The higher the hit rates, the more they reduce. Here we can see L1 sector loads and L2 sector loads are the same. This is because all the addresses in residual will only be accessed once, so the hit rate is 0%. All the sectors being accessed in L1 are forwarded to L2.  Previously we mentioned that the Eigen llm.cpp is utilizing vectorized load, and that's why the L1 requests of Eigen are relatively low compared to the CCCL version. There are also different dram sector reads between two implementations. This is probably because of L2 partitions or the activations that remain in L2 since L2 will not be flushed between kernel launches.
 
-## Dram throughput
+### HBM throughput
 
 Finally, after requests have been filtered through L1 and L2, they reach dram, whose bandwidth greatly affects the overall performance of the system. CUPTI provides dram\_\_throughput.avg.pct\_of\_peak\_sustained\_elapsed, a percentage showing how much of theoretical sustained peak throughput one kernel can use, but this metrics only measures per kernel throughput. If we calculate the average throughput through adding all the metrics in range and divide by number of kernels in range, in some extreme cases, it may show misleading throughput because it loses the information of time. For example, if we have 1 kernel that heavily utilizes 100% throughput for an hour and 99 kernels use 0% in just 1 second, we will get an average usage of 1%, which looks pretty off. Therefore, instead of directly averaging the throughput metrics provided by CUPTI, we calculate the overall throughput by doing
 
