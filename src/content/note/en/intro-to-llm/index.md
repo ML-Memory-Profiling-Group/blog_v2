@@ -294,7 +294,7 @@ When SASS loads and stores are executed in the thread, they will be coalesced wi
 * lts\_\_t\_sectors\_srcunit\_tex\_op\_read.sum: the sectors accessed by the L2 requests from L1. Each request can contain 1\~4 sectors. This metric also represents how many sectors L1 missed.  
 * dram\_\_sectors\_read.sum: sectors requested from L2 because of L2 misses.Note that though dram sends the data in bursts, the unit of these metrics is 32 byte sectors, so these metrics should be the actual bytes loaded divided by 32\.
 
-![Distribution of Memory Counters](memory-metrics-bar-chat.png)
+![Distribution of Memory Counters](memory-metrics-bar-chart.png)
 
 In general, from L1 to L2 to dram, the sector metrics should gradually reduce. The higher the hit rates, the more they reduce. Here we can see L1 sector loads and L2 sector loads are the same. This is because all the addresses in residual will only be accessed once, so the hit rate is 0%. All the sectors being accessed in L1 are forwarded to L2.  Previously we mentioned that the Eigen llm.cpp is utilizing vectorized load, and that's why the L1 requests of Eigen are relatively low compared to the CCCL version. There are also different dram sector reads between two implementations. This is probably because of L2 partitions or the activations that remain in L2 since L2 will not be flushed between kernel launches.
 
