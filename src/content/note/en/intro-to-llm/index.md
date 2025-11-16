@@ -288,7 +288,7 @@ As instructions execute in CUDA threads, their memory accesses may be coalesced 
 
 ![Distribution of Memory Counters](memory-metrics-bar-chart.png)
 
-* The Attention and MLP blocks collectively account for more than $95\%$ of all accesses to the memory hierarchy. The contribution from the next most important block, Layer Norm, appears meager, registering only $1\%$ to $3\%$ of total memory accesses. However, from an execution-time perspective, even this relatively small LayerNorm share ends up consuming 20–25% of the total time, because it is strongly memory-bound.
+* The Attention and MLP blocks collectively account for more than $95\%$ of all accesses to the memory hierarchy. The contribution from the next most important block, Layer Norm, appears meager, registering only $1\%$ to $3\%$ of total memory accesses. However, from an execution-time perspective, even this relatively small LayerNorm share ends up consuming $20–25\%$ of the total time, because it is strongly memory-bound.
 
 First, if we compare Attention and MLP in terms of global loads, we see that Attention accounts for roughly half as many global loads as the MLP.
 * The LLM-Eigen implementation consistently maintains this $\approx 50\%$ ratio for the Attention block's memory contribution over MLP across the entire hierarchy, from instruction count all the way down to the HBM reads.
@@ -297,6 +297,23 @@ First, if we compare Attention and MLP in terms of global loads, we see that Att
 For global stores, the picture is slightly different. In the LLM-Eigen implementation, Attention’s SASS store instructions, L1 requests, and L2 accesses are all roughly 30% higher than those in the MLP region. In the LLM-CCCL implementation, the same quantities are about 10% higher for Attention than for MLP. However, at the HBM level, the pattern mirrors what we observed for loads: Attention ends up with roughly half as many HBM store transactions as the MLP region.
 
 Crucially, this memory behavior directly contrasts with the actual GPU execution time due to compute boundness of these regions. As previously analyzed, the Attention block consumes approximately $20\%$ more execution time than the MLP block in the optimized LLM-CCCL implementation. For the LLM-Eigen implementation, this disparity is vastly exaggerated, with the Attention block consuming more than five times the execution time of the MLP block due to the significant overhead imposed by multiple kernel invocations and the resultant under-utilization that we have thoroughly documented throughout this blog.
+
+|Attention/MLP | LLM-Eigen | LLM-CCCL |
+|--------------|-----------|----------|
+|Global Load Instructions | 0.5 | 1.1 |
+|Global Store Instructions | 1.3 | 1.1 |
+|Global Load Bytes | 0.5| 1.0 |
+|Global Store Bytes | 1.4 | 1.1 |
+|L1 Load Requests | 0.5 | 0.7 |
+|L1 Store Requests | 1.3 | 1.1 |
+|L1 Load Sectors | 0.6 | 0.6 |
+|L1 Store Sectors | 1.3 | 1.1 |
+|L2 Load Sectors | 0.5 | 0.6 |
+|L2 Store Sectors | 1.3 | 1.1 |
+|HBM Sectors Read | 0.5 | 0.5 |
+|HBM Sectors Write | 0.5 | 0.5 |
+|GPU Time | 5.2 | 1.2 |
+|Overall Time | 5.8 | 1.2 |
 
 
 ### HBM throughput
