@@ -298,7 +298,7 @@ For global stores, the picture is slightly different. In the LLM-Eigen implement
 
 Crucially, this memory behavior directly contrasts with the actual GPU execution time due to compute boundness of these regions. As previously analyzed, the Attention block consumes approximately $20\%$ more execution time than the MLP block in the optimized LLM-CCCL implementation. For the LLM-Eigen implementation, this disparity is vastly exaggerated, with the Attention block consuming more than five times the execution time of the MLP block due to the significant overhead imposed by multiple kernel invocations and the resultant under-utilization that we have thoroughly documented throughout this blog.
 
-|Attention/MLP | LLM-Eigen | LLM-CCCL |
+|Attention/MLP Factor | LLM-Eigen | LLM-CCCL |
 |--------------|-----------|----------|
 |Global Load Instructions | 0.5 | 1.1 |
 |Global Store Instructions | 1.3 | 1.1 |
@@ -315,6 +315,24 @@ Crucially, this memory behavior directly contrasts with the actual GPU execution
 |GPU Time | 5.2 | 1.2 |
 |Overall Time | 5.8 | 1.2 |
 
+The table below compares the two implementations at the full-layer level. The LLM-Eigen implementation executes almost $9\times$ more load instructions than the LLM-CCCL implementation.This excessive instruction count results in a corresponding increase in cache activity: approximately $3.7\times$ more L1 requests and $1.3\times$ more L2 requests. Crucially, despite these massive differences in instructions and cache traffic, both implementations end up making the same total number of HBM read requests. For global stores, the picture is more balanced. Eigen issues only about 10% more SASS store instructions than CCCL. This difference amplifies somewhat at the cache levels (around 1.7x more L1/L2 store requests), but again, by the time we reach HBM, both implementations end up with nearly the same number of HBM store transactions.
+
+|Eigen/CCCL |  Factor |
+|-----------|---------|
+|Global Load Instructions | 9.2 
+|Global Store Instructions | 1.1 
+|Gobal Load Bytes | 9.3 |
+|Gobal Store Bytes | 1.1 |
+|L1 Load Requests | 3.7 |
+|L1 Store Requests | 1.1 | 
+|L1 Load Sectors | 5.1 |
+|L1 Store Sectors | 2.1 |
+|L2 Load Sectors | 1.3 |
+|L2 Store Sectors | 1.7 |
+|HBM Sectors Read | 1.0 |
+|HBM Sectors Write | 0.9 | 
+|GPU Time | 31.0 |
+|Overall Time | 28.0 |
 
 ### HBM throughput
 
