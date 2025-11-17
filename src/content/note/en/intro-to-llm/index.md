@@ -10,7 +10,7 @@ description: 'A profiling tutorial for Nvidia GPUs with two different GPT-2 work
 This blog is written for readers ranging from beginners moderately familiar with CUDA and LLMs to experienced developers eager to explore the micro-architectural performance characteristics of LLMs executing on NVIDIA GPUs. The discussion is intentionally technical and data-heavy, but we have deliberately omitted many esoteric, advanced architectural aspects for the sake of clarity and simplicity, ensuring that the core principles of optimization remain in focus.
 
 To illustrate the profound impact of software design on performance, we perform a deep dive on two GPT-2 implementations and discuss their kernel structure, memory behavior, and use of backend libraries. By examining these two versions side by side, we expose performance characteristics that are highly relevant to modern transformer architecture. 
-We focus specifically on the forward pass—the execution path used for both training and inference—on a single GPU A100. These analyses provide a practical, system-level view of what truly happens when an LLM runs on an NVIDIA GPU—and what matters most when profiling or optimizing such models.
+We focus specifically on the forward pass—the execution path used for both training and inference—on a single A100 GPU. These analyses provide a practical, system-level view of what truly happens when an LLM runs on an NVIDIA GPU—and what matters most when profiling or optimizing such models.
 
 # The Computational Core of Modern LLMs
 A prerequisite for effective performance analysis is a foundational understanding of the target software's core working mechanisms. To establish a solid baseline for our performance expectations, this section will detail the internal workings of the GPT-2 architecture as implemented in our two C++ codebases: the Eigen-Optimized Kernel [LLM-Eigen](https://github.com/zhangpiu/llm.cpp.git) and the CCCL-Accelerated Engine [LLM-CCCL](https://github.com/gevtushenko/llm.c.git) both originated from legendary Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c.git). We will illustrate how architectural and implementation choices shape the runtime behavior and performance characteristics of transformer-based models. This foundational understanding will help establish clear performance expectations and guide the deeper profiling and analysis discussed in later sections. Readers already familiar with GPT-2 internals and model execution pipelines may choose to skim this section and proceed directly to the detailed performance investigation.
@@ -356,4 +356,6 @@ Finally, at the full LLM layer level, both implementations use far less HBM band
 In future posts, we will dive deeper into NVIDIA’s built-in performance counters—accessible through CUPTI—to analyze additional aspects of memory behavior, bandwidth utilization, and other low-level metrics.
 
 # References
-
+[GPT2 Architecture](https://medium.com/@hsinhungw/gpt-2-detailed-model-architecture-6b1aad33d16b)
+[CUPTI Profiling Tool](https://labmem003.blog/posts/introduction_to_cupti/introduction_to_cupti)
+[Roofline Model](https://docs.nersc.gov/tools/performance/roofline/)
