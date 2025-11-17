@@ -2,7 +2,8 @@
 title: 'Introduction to LLM Profiling'
 timestamp: 2025-10-24 00:00:00+00:00
 series: LLM
-tags: [GPU]
+tags: [GPU, CUDA, Profiling]
+authors: Zehao Lu and Prasenjit Chakraborty
 description: 'A profiling tutorial for Nvidia GPUs with two different GPT-2 workflow'
 ---
 
