@@ -40,9 +40,7 @@ This reference will also be valuable in the next section, where we develop the r
 |FeedForward: MLP1 & MLP2|MLP::Forward @ gpt.hpp nn::Linear::Forward|matmul_forward_cublaslt @ train_gpt2.cu(cublasLtMatmul)|
 |FeedForward: GeLU|nn::NewGELU::Forward @ gpt.hpp|gelu_forward @ train_gpt2.cu|
 
-# Basics of GPU
-
-# CUPTI
+# GPU Profiling using CUPTI
 
 CUPTI is a set of API that enables developers to both retrieve hardware counters from NVidia GPUs and trace the host-side activities on CUDA. It serves as the foundation of NSight Compute, the official GPU profiler provided by NVidia. With CUPTI, independent developers can develop customized profilers that leverage the same sets of metrics and derive their own specialized insights through custom data processing
 
@@ -335,26 +333,23 @@ The table below compares the two implementations at the full-layer level. The LL
 |Overall Time | 28.0 |
 
 ### HBM throughput
+While NVIDIA GPUs expose a wide range of hardware counters for measuring DRAM/HBM bandwidth, we keep things simple in this blog by computing HBM bandwidth directly using the formula shown below. This provides a clear and easy to interpret metric across both LLM versions.
 
-Finally, after requests have been filtered through L1 and L2, they reach dram, whose bandwidth greatly affects the overall performance of the system. CUPTI provides dram\_\_throughput.avg.pct\_of\_peak\_sustained\_elapsed, a percentage showing how much of theoretical sustained peak throughput one kernel can use, but this metrics only measures per kernel throughput. If we calculate the average throughput through adding all the metrics in range and divide by number of kernels in range, in some extreme cases, it may show misleading throughput because it loses the information of time. For example, if we have 1 kernel that heavily utilizes 100% throughput for an hour and 99 kernels use 0% in just 1 second, we will get an average usage of 1%, which looks pretty off. Therefore, instead of directly averaging the throughput metrics provided by CUPTI, we calculate the overall throughput by doing
+$$Average HBM BW = \frac{(HBMReadSectors + HBMWriteSectors) \times SizeofSector}{GpuTime}$$
 
-$$DramThroughput = \frac{(DramReadSectors + DramWriteSectors) \times 32}{GpuTime}$$
+The chart below shows the measured HBM bandwidth per performance region and the overall average bandwidth at the full layer.
 
-Here is the data we produced:
+![][HBM-BW.png]  
 
-![][dram-throughput]  
+Focusing first on the two main regions, Attention and MLP:
+* In the Eigen implementation, the Attention region exhibits very low HBM bandwidth, reflecting the previously discussed inefficiencies.
+* In contrast, the CCCL Attention implementation reaches an average of about 256 GB/s.
+* For the MLP region, both implementations drive the memory system harder relatively speaking: Eigen reaches around 55 GB/s and CCCL–MLP reaches approximately 633 GB/s.
 
-From the chart, we can find that generally the CCCL version consumes more dram throughput than the Eigen one. Previously we talked about the low grid size of the Eigen version. The low SM utilization will lead to slow issue rate of load and store instructions, causing low throughput. Remember the average grid size for Eigen implementation is 3. This makes most of the SM inactive, not being able to commands and leave the remaining throughput wasted. 
+The Residual layers, being memory-bound, predictably end up extracting relatively higher bandwidth in both implementations. However, LayerNorm in both cases shows very low HBM bandwidth, and given its sizable share of execution time and memory-bound nature, it is a strong candidate for deeper investigation into memory bottlenecks.
+Finally, at the full LLM layer level, both implementations use far less HBM bandwidth than the hardware can provide: Eigen averages only about 10 GB/s, while CCCL reaches around 330 GB/s—still well below peak, but substantially better utilized than Eigen.
 
-Another reason might be  the GPU time of the range. If we refer back to the prior section, we can find that the CCCL version takes less than 1/10 GPU time of the Eigen ones. Our equation of the throughput indicates that the denominator is the GPU time. With the same amount of dram loads and stores, the bandwidth will be multiple times higher if the time is as short as that. The reduced time of the CCCL llm.cpp indicates a better usage of dram bandwidth over leaving the bandwidth wasted for a long period of time.
+In future posts, we will dive deeper into NVIDIA’s built-in performance counters—accessible through CUPTI—to analyze additional aspects of memory behavior, bandwidth utilization, and other low-level metrics.
 
-Finally, the layer norms barely accessed the dram in both implementations. This is expected because the calculation of the norms doesn't involve any parameters. All it needs is to load the previous activations and store the result norm. As L2 will not be flushed across kernels, the activation produced by the previous range should still reside in the L2. Therefore even if there will be SASS  loads and L1 requests, these accesses will be filtered out by L2 and keep the dram intact. That's another reason to explain layer norms use such a little throughput in both implementations other than the grid size.  
+# References
 
-[kernel-num]: <kernel-num.png>
-[forward-wallclock-time]: <forward-wallclock-time.png>
-[forward-wallclock-time-ratio]: <forward-wallclock-time-ratio.png>
-[kernel-num-ratio]: <kernel-num-ratio.png>
-[forward-gpu-time]: <forward-gpu-time.png>
-[forward-gpu-time-ratio]: <forward-gpu-time-ratio.png>
-[residual-accesses]: <residual-accesses.png>
-[dram-throughput]: <dram-throughput.png>
