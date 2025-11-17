@@ -11,6 +11,25 @@ const note = defineCollection({
 	schema: z.object({
 		title: z.string(),								// Post title (required)
 		timestamp: z.date(),							// Publication date (required)
+		authors: z.union([								// Multiple authors support
+			z.string(),									// Single author as string
+			z.array(z.string()),						// Multiple authors as string array
+			z.object({									// Single author object
+				name: z.string(),
+				email: z.string().optional(),
+				link: z.string().optional()
+			}),
+			z.array(z.object({							// Multiple author objects
+				name: z.string(),
+				email: z.string().optional(),
+				link: z.string().optional()
+			}))
+		]).optional(),
+		author: z.union([z.string(), z.object({			// Legacy single author field (for backward compatibility)
+			name: z.string(),
+			email: z.string().optional(),
+			link: z.string().optional()
+		})]).optional(),
 		series: z.string().optional(),					// Series name for grouped posts
 		tags: z.array(z.string()).optional(),			// Array of topic tags
 		description: z.string().optional(),				// Post description/excerpt
@@ -31,6 +50,25 @@ const jotting = defineCollection({
 	schema: z.object({
 		title: z.string(),								// Jotting title (required)
 		timestamp: z.date(),							// Publication date (required)
+		authors: z.union([								// Multiple authors support
+			z.string(),									// Single author as string
+			z.array(z.string()),						// Multiple authors as string array
+			z.object({									// Single author object
+				name: z.string(),
+				email: z.string().optional(),
+				link: z.string().optional()
+			}),
+			z.array(z.object({							// Multiple author objects
+				name: z.string(),
+				email: z.string().optional(),
+				link: z.string().optional()
+			}))
+		]).optional(),
+		author: z.union([z.string(), z.object({			// Legacy single author field (for backward compatibility)
+			name: z.string(),
+			email: z.string().optional(),
+			link: z.string().optional()
+		})]).optional(),
 		tags: z.array(z.string()).optional(),			// Array of topic tags
 		description: z.string().optional(),				// Brief description
 		sensitive: z.boolean().default(false),			// Marks content as sensitive

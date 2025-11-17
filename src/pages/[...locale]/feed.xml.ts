@@ -80,15 +80,40 @@ export const GET: APIRoute = async ({ site, params }) => {
 		.slice(0, config.feed?.limit || items.length);									// Limit to number of items
 
 	// Add each filtered note as a feed item
-	items.forEach((item) => feed.addItem({
-		id: item.id,																								// Unique item identifier
-		title: item.data.title,																						// Post title
-		link: (<any>item).link,																						// URL to the post
-		date: item.data.timestamp,																					// Publication date
-		content: item.data.sensitive ? t("sensitive.feed", { link: (<any>item).link }) : item.rendered?.html,		// Rendered content
-		description: item.data.description,																			// Summary of the post
-		category: item.data.tags?.map((tag: any) => ({ term: tag }))												// Tags as categories
-	}));
+	items.forEach((item) => {
+		// Get author info - prioritize 'authors' field, then fall back to 'author', then site config
+		function normalizeAuthors(authors: any, author: any, fallback: any) {
+			if (authors) {
+				if (typeof authors === 'string') return [authors];
+				if (Array.isArray(authors)) return authors;
+				return [authors];
+			}
+			if (author) {
+				return [author];
+			}
+			return [fallback];
+		}
+
+		const itemAuthors = normalizeAuthors(item.data.authors, item.data.author, config.author);
+		
+		// Convert authors to feed format
+		const feedAuthors = itemAuthors.map((author: any) => 
+			typeof author === "string" 
+				? { name: author }
+				: { name: author.name, email: author.email, link: author.link }
+		);
+		
+		feed.addItem({
+			id: item.id,																								// Unique item identifier
+			title: item.data.title,																						// Post title
+			link: (<any>item).link,																						// URL to the post
+			date: item.data.timestamp,																					// Publication date
+			content: item.data.sensitive ? t("sensitive.feed", { link: (<any>item).link }) : item.rendered?.html,		// Rendered content
+			description: item.data.description,																			// Summary of the post
+			category: item.data.tags?.map((tag: any) => ({ term: tag })),												// Tags as categories
+			author: feedAuthors
+		});
+	});
 
 	// Append stylesheet declaration to the feed
 	const XML = feed.atom1().replace(

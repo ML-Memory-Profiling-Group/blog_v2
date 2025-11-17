@@ -1,9 +1,13 @@
 ---
 title: 'Introduction to LLM Profiling'
 timestamp: 2025-10-24 00:00:00+00:00
+authors:
+  - name: "Zehao Lu"
+    link: "https://ml-memory-profiling-group.github.io/"
+  - name: "Prasenjit Chakraborty"
+    link: "https://ml-memory-profiling-group.github.io/"
 series: LLM
 tags: [GPU, CUDA, Profiling]
-authors: Zehao Lu and Prasenjit Chakraborty
 description: 'A profiling tutorial for Nvidia GPUs with two different GPT-2 workflow'
 ---
 
