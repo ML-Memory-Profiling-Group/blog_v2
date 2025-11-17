@@ -7,6 +7,9 @@ description: 'A profiling tutorial for Nvidia GPUs with two different GPT-2 work
 ---
 
 # Introduction
+This blog is written for readers ranging from beginners moderately familiar with CUDA and LLMs to experienced developers eager to explore the micro-architectural performance characteristics of LLMs executing on NVIDIA GPUs. The discussion is intentionally technical and data-heavy, but we have deliberately omitted many esoteric, advanced architectural aspects for the sake of clarity and simplicity, ensuring that the core principles of optimization remain in focus.
+
+To illustrate the profound impact of software design on performance, we perform a deep dive on two GPT-2 implementations and discuss their kernel structure, memory behavior, and use of backend libraries. By examining these two versions side by side, we expose performance characteristics that are highly relevant to modern transformer architecture. These analyses provide a practical, system-level view of what truly happens when an LLM runs on an NVIDIA GPU—and what matters most when profiling or optimizing such models.
 
 # The Computational Core of Modern LLMs
 A prerequisite for effective performance analysis is a foundational understanding of the target software's core working mechanisms. To establish a solid baseline for our performance expectations, this section will detail the internal workings of the GPT-2 architecture as implemented in our two C++ codebases: the Eigen-Optimized Kernel [LLM-Eigen](https://github.com/zhangpiu/llm.cpp.git) and the CCCL-Accelerated Engine [LLM-CCCL](https://github.com/gevtushenko/llm.c.git) both originated from legendary Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c.git). We will illustrate how architectural and implementation choices shape the runtime behavior and performance characteristics of transformer-based models. This foundational understanding will help establish clear performance expectations and guide the deeper profiling and analysis discussed in later sections. Readers already familiar with GPT-2 internals and model execution pipelines may choose to skim this section and proceed directly to the detailed performance investigation.
@@ -339,7 +342,7 @@ $$Average HBM BW = \frac{(HBMReadSectors + HBMWriteSectors) \times SizeofSector}
 
 The chart below shows the measured HBM bandwidth per performance region and the overall average bandwidth at the full layer.
 
-![][HBM-BW.png]  
+![](HBM-BW.png)
 
 Focusing first on the two main regions, Attention and MLP:
 * In the Eigen implementation, the Attention region exhibits very low HBM bandwidth, reflecting the previously discussed inefficiencies.
