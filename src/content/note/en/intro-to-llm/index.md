@@ -73,7 +73,7 @@ It can also be divided into multiple sets by the way it collects data, including
 For this detailed analysis, we utilized our custom tool: the **GPU Memory Profiler (GMP)** . This profiler was built atop the CUPTI's stack, leveraging both the Activities API and the Range Profiling API for fine-grained tracing and performance data collection. For the purposes of this blog, we will focus exclusively on interpreting the performance data collected.
 If you'd like to explore or reproduce the tooling, we have put down the following resources:
 * Source Code: [github](https://github.com/ZehaoLu98/GMP)
-* Tutorial: [link](https://labmem003.blog/posts/introduction_to_cupti/introduction_to_cupti)
+* Tutorial: [link](https://zehaoblog.com/posts/introduction_to_cupti/introduction_to_cupti)
 
 To profile the specific computational blocks we are interested in, such as a single GEMM operation or a complete sub-block the GMPProfiler utilizes a range-based profiling methodology. It lets you mark logical ranges by wrapping code with push/pop calls. Here is a sample code snippet illustrating how we wrapped and timed a specific range:
 
