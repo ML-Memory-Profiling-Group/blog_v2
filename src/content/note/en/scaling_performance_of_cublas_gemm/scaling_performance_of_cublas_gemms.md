@@ -12,9 +12,17 @@ description: ''
 ---
 
 # Introduction
-Attention layer is among the most time-consuming part of any LLM. It consists of multiple matrix multiplications that are theoretically bottlenecked by tensor core throughput according to the roofline model from this post[link]. However, our result reveals that the memory throughput instead is constraining the performance of the attention layer. This discrepancy between theory and reality leads to this post. 
+Attention layer is among the most time-consuming part of any LLM. It consists of multiple matrix multiplications that are theoretically bottlenecked by tensor core throughput according to the roofline model from this post[link]. However, our transformer scaling analysis shows that the attention block’s matrix multiplications do not scale uniformly: performance shifts with shape, batching, and layout in ways that materially change where the bottleneck exists. This discrepancy between theory and reality leads to this post. We analyze a few representative cuBLAS GEMM kernels on a single NVIDIA GPU. Additionally, to ensure our assessment remains grounded in modern workloads, we utilize matrix dimensions derived from the Llama 3.1 architecture spanning both training and inference scenarios.
 
-GEMM(i.e. General Matrix Multiplication) is always one of the hottest topic in HPC. The transformer architecture made this even more stark: every attention layer, every feed-forward block, every projection is fundamentally a GEMM, therefore even small amount of improvement on GEMM can cause huge impact on overall system performance. With the increasing problem size, the performance usually starts to be limited by either the memory throughput or compute resources. Through this post, I will introduce the GEMM performance of various matrix size, shape and batch size, revealing the bottleneck in different conditions. The attention layer GEMM performance of the popular open-source model, llama3, will also be provided for practical analysis.   
+GEMM(i.e. General Matrix Multiplication) is always one of the hottest topic in HPC. The transformer architecture made this even more stark: every attention layer, every feed-forward block, every projection is fundamentally a GEMM, therefore even small amount of improvement on GEMM can cause huge impact on overall system performance. You can refer to our earlier [blog](https://ml-memory-profiling-group.github.io/blog_v2/note/intro-to-llm/) for a quick refresher on transformer operations. In a standard multi-head self-attention (MHA) block, the heavy compute is essentially two matrix multiplications per head:
+* $$\text{Attention Scores} = Q \times K^T$$ ==> [S x D/H] x [D/H x S] = [S x S]
+* $$\text{Value Attention} = Softmax(Q \times K^T) \times V$$ ==> [S x S] x [S x D/H] = [S x D/H]
+
+where S is the sequence length, D is the model hidden dimension and H is the number of head.
+
+The Transformer architecture is designed such that each of the $H$ heads operates in a different representation subspace and performs the above two GEMMs independently between the heads.
+
+Given this there are two ways to implement the above operations:
 
 # Setup
 We will profile 4 ways of computing GEMM using cuBLAS. To compare apples to apples, it is ensured that every cuBLAS GEMM perform the same amount of FLOPs with FP32 and running on the same device, which is an A100 (40GB, SXM4).
