@@ -1,5 +1,5 @@
 ---
-title: 'Scaling Performance of Cublas GEMMs'
+title: 'Scaling Analysis of Cublas GEMMs for Self Attention Kernels'
 timestamp: 2025-12-29 00:00:00+00:00
 authors:
   - name: "Zehao Lu"
