@@ -142,26 +142,29 @@ CHECK_CUBLAS(cublasSgemmStridedBatched(handle,
                                         d_C, m, stride_C,
                                         batch_size));
 ```
-# $k$ batches of $(N \times N) \times (N \times N)$
-We begin with square matrix multiplications, the simplest and most symmetric case. In batched methods, we perform k independent multiplications of $(N \times N) \times (N \times N)$. To ensure fair comparison across all four methods, we configure each to perform identical total FLOPs:
+## Workload Dimension: the parameter space and scaling knob
+We begin with square matrix multiplications, the simplest and most symmetric case. We perform $k$(batch size) independent multiplications of $A[N \times N] \times B[N \times N] = C[N \times N]$. To ensure fair comparison across all four methods, we configure each to perform identical total FLOPs:
 
-| Method | Configuration | Total FLOPs |
-|--------|---------------|-------------|
-| Single Big GEMM | $(N \times N) \times (N \times kN)$ | $2kN^3$ |
-| Naive GEMM | $k$ iterations of $(N \times N) \times (N \times N)$ | $2kN^3$ |
-| Batched GEMM | $k$ batched $(N \times N) \times (N \times N)$ | $2kN^3$ |
-| Strided Batched GEMM | $k$ batched $(N \times N) \times (N \times N)$ | $2kN^3$ |
+| Method | Configuration | Total FLOPs | Total Memory |
+|--------|---------------|-------------|--------------|
+| Big-GEMM | $(N \times N) \times (N \times kN)$ | $2kN^3$ | $(2k + 1)N^2$ |
+| Iterative-GEMM | $k$ iterations of $(N \times N) \times (N \times N)$ | $2kN^3$ | $3kN^2$ |
+| Batched-GEMM | $k$ batched $(N \times N) \times (N \times N)$ | $2kN^3$ | $3kN^2$ |
+| Strided-Batched-GEMM | $k$ batched $(N \times N) \times (N \times N)$ | $2kN^3$ | $3kN^2$ |
 
-The A100's 40 MB L2 cache plays a critical role in GEMM performance. When working sets fit in L2, data can be reused across thread blocks without expensive memory accesses. We select three values of $N$ to test different cache behaviours:
+Across the setups above, arithmetic intensity increases with $O(N). This suggests that at larger N, the kernels may move toward the compute-bound regime. We evaluate how often and under which shapes this actually occurs.
 
-| $N$ | Per-Batch Size($A+B+C$) | Ratio to L2 (40 MB) | Expected Behavior |
-|-----|---------------------------------------------|---------------------|-------------------|
-| 1024 | 12 MB | ~0.3× | Fits comfortably; high L2 hit rate |
-| 2560 | 75 MB | ~1.9× | Exceeds L2; partial eviction |
-| 4096 | 192 MB | ~4.8× | Far exceeds L2; streaming from memory |
+The A100's 40 MB L2 cache plays a critical role in GEMM performance. When working sets fit in L2, data can be reused across thread blocks without expensive memory accesses. To investigate how cuBLAS adapts its strategies to these hardware limits, we selected three specific values for our scaling dimension $N$, each representing a distinct caching regime:
 
-For each $N$, we increase $k$ from 2 until running out of GPU memory, observing how each method scales.
+Caching Regime | $N$ | Memory Size($A+B+C$) | Ratio to L2 (40 MB) | Expected Behavior |
+|--------------|-----|----------------------|---------------------|-------------------|
+|Cache Resident   | 1024 | 12 MB | ~0.3× | Fits comfortably; high L2 hit rate |
+|Tiling Transition| 2560 | 75 MB | ~1.9× | Exceeds L2; partial eviction |
+|Memory Streaming | 4096 | 192 MB | ~4.8× | Far exceeds L2; streaming from memory |
 
+For each $N$, we progressively increase $k$ from 2 up to the maximum feasible value before exhausting GPU memory, and measure how the runtime and throughput of each method scale.
+
+# Results
 ![wallclock_time](wallclock_time_comparison.png)
 
 The overall wallclock time is shown in the above plot, with y axis presented at logarithmic scale. It clearly reveals that among different N, Naive GEMM always perform far worse than other three methods, and the performance gap scales with the k respectively. This matches our expectation because Naive GEMM launches $k$ kernels in the loops and therefore kernel overhead accumulates and finally dominates the wallclock time as $k$ increases.
