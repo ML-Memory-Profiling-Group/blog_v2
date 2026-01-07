@@ -16,11 +16,11 @@ Attention layer is among the most time-consuming part of any LLM. It consists of
 
 GEMM(i.e. General Matrix Multiplication) is always one of the hottest topic in HPC. The transformer architecture made this even more stark: every attention layer, every feed-forward block, every projection is fundamentally a GEMM, therefore even small amount of improvement on GEMM can cause huge impact on overall system performance. You can refer to our earlier [blog](https://ml-memory-profiling-group.github.io/blog_v2/note/intro-to-llm/) for a quick refresher on transformer operations. In a standard multi-head self-attention (MHA) block, the heavy compute is essentially two matrix multiplications per head:
 * $$\text{Attention Scores}: Q \times K^T ==> [S \times D/H] \times [D/H \times S] = [S \times S]$$
-* $$\text{Value Attention}: Softmax(Q \times K^T) \times V ==> [S \times S] x [S \times D/H] = [S \times D/H]$$
+* $$\text{Value Attention}: Softmax(Q \times K^T) \times V ==> [S \times S] \times [S \times D/H] = [S \times D/H]$$
 
 where $S$ is the sequence length, $D$ is the model hidden dimension and $H$ is the number of head.
 
-The Transformer architecture is designed such that each of the $H$ heads operates in a different representation subspace and performs the above two GEMMs independently between the heads.
+The Transformer architecture is designed such that each of the $H$ head operates in a different representation subspace and performs the above two GEMMs independently between the heads.
 
 Given this there are two ways to implement each of the above GEMM:
 * Implement iteratively using a loop over $H$, we would launch $H$ separate, smaller GEMM kernels
@@ -31,8 +31,8 @@ For more details you can refer to NVIDIA's blog on [BatchedGemm](https://develop
 # Setup
 We will profile 4 ways of computing GEMM using cuBLAS. To compare apples to apples, it is ensured that every cuBLAS GEMM perform the same amount of FLOPs with FP32 and running on the same device, which is an A100 (40GB, SXM4).
 
-## Single Big GEMM
-This is simply calling *cublasSgemm* with wider matrix compared to other methods. This is expected to perform at least no worse than other metrics because:
+## Big-GEMM: the practical performance upper bound
+Treat the entire Multi-Head Attention operation as one massive, monolithic matrix multiplication. This is simply calling *cublasSgemm* with wider matrix compared to other methods. This is expected to perform at least no worse than other metrics because:
 
 * More opportunities to reuse the memory.
 * More algorithms available for larger matrices.
@@ -41,8 +41,8 @@ This is simply calling *cublasSgemm* with wider matrix compared to other methods
 
 Therefore the single big GEMM is considered as a upper bound on Performance among all the methods.
 
-## Naive GEMM
-Given many small matrix multiplications, we have two ways of distributing the work to GPU: either launching one kernel for each matrix multiplications or fusing the kernels into one or several mega-kernels. The so called Naive GEMM refers to the first approach, by continuously launching per-multiplication small kernels in a for-loop. Here is a piece of sample code: 
+## Iterative-GEMM: the naive decomposition
+Given many small matrix multiplications, we have two ways of distributing the work to GPU: either launching one kernel for each matrix multiplications or fusing the kernels into one or several mega-kernels. IterativeGEMM continuously launches per-head matrix multiplication small kernels in a for-loop. Here is a piece of sample code: 
 
 ```cpp
 for (int i = 0; i < batch_size; i++) {
@@ -56,8 +56,12 @@ for (int i = 0; i < batch_size; i++) {
 }
 ```
 
-## Batched GEMM
-As mentioned before, the second approach for many small matrix multiplications is batching. The Batched GEMM allows you to perform multiple independent matrix multiplications in a single or small amount of kernel launches, which are supposed to be much more efficient than launching separate GEMM operations. To batch the GEMM, we simply prepare the input matrices as array of pointers and call the corresponding CUBLASS API:
+## Batched-GEMM: the smart aggregated execution
+As mentioned before, the second approach for many small matrix multiplications is batching. The Batched GEMM allows you to perform multiple independent matrix multiplications in a single or small amount of kernel launches, which are supposed to be much more efficient than launching separate GEMM operations. This is supossedly the smart choice:
+* Reduced Launch Overhead
+* Smart Scheduling
+
+To batch the GEMM, we simply prepare the input matrices as array of pointers and call the corresponding CUBLASS API:
 
 ```cpp
 // Allocating DEVICE matrices and store the pointers in HOST vectors
@@ -106,7 +110,7 @@ CHECK_CUBLAS(cublasSgemmBatched(handle,
                                 batch_size));
 ```
 
-## Strided Batched GEMM
+## Strided-Batched-GEMM: the contigous memory advantage
 Similar to Batched GEMM, cuBLAS provides another way to batch small GEMMs. The essential difference of the two batched GEMM are the memory layout of the input matrices. Batched GEMM stores the matrices separately, whereas Strided Batched GEMM utilizes a contiguous piece memory to store each matrix. Instead of accepting pointer arrays to matrices, Strided Batched GEMM receives the base device pointers of matrices along with the stride, which are used to compute the address of sub-matrices.
 
 The benefit of this method is clear: for array-of-pointer solution, it needs to first read the pointer, and then read the data from the memory. However, only one read is needed for the pointer-with-stride option because the pointer is calculated through the base pointer, batch id and stride.
