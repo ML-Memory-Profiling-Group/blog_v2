@@ -1,12 +1,14 @@
 ---
-title: Scaling Performance of LLM Training
-published: 2026-01-13
+title: 'Scaling Performance of LLM Training'
+timestamp: 2026-01-13 00:00:00+00:00
+authors:
+  - name: "Zehao Lu"
+    link: "https://ml-memory-profiling-group.github.io/"
+  - name: "Prasenjit Chakraborty"
+    link: "https://ml-memory-profiling-group.github.io/"
+series: LLM
+tags: [GPU, CUDA, Profiling]
 description: ''
-image: ''
-tags: [GPU, GEMM, Profiling]
-category: Performance Analysis
-draft: true 
-lang: 'en'
 ---
 
 # Introduction
