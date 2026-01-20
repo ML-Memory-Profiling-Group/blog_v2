@@ -165,13 +165,20 @@ Caching Regime | $N$ | Memory Size($A+B+C$) | Ratio to L2 (40 MB) | Expected Beh
 For each $N$, we progressively increase $k$ from 2 up to the maximum feasible value before exhausting GPU memory, and measure how the runtime and throughput of each method scale.
 
 # Results
-![wallclock_time](wallclock_time_comparison.png)
+We begin by examining how each implementation scales with batch size $k$ under the different cache regimes. In each figure, the x-axis is $k$ and the y-axis reports normalized runtime in log scale, where we divide each method’s runtime by its own runtime at $k=2$. By plotting both GPU Time (the duration the kernels actually spend on the hardware) and Wall Clock Time (the total time from the CPU’s perspective), we can precisely decouple kernel efficiency from system-level overhead.
 
-The overall wallclock time is shown in the above plot, with y axis presented at logarithmic scale. It clearly reveals that among different N, Naive GEMM always perform far worse than other three methods, and the performance gap scales with the k respectively. This matches our expectation because Naive GEMM launches $k$ kernels in the loops and therefore kernel overhead accumulates and finally dominates the wallclock time as $k$ increases.
+![Time Scaling for Cache Resident Regime](n-1024-time-scale.png)
 
-![wall_clock_time_without_naive](wallclock_time_ratio.jpg)
+In the cache-resident regime (N = 1024), Iterative-GEMM shows an almost perfectly linear increase in GPU time as $k$ grows. In contrast, both Big-GEMM and Batched-GEMM scale sub-linearly, indicating that with a larger effective workload they can utilize GPU resources more efficiently (better scheduling/occupancy and improved overlap of latency..). The wall-clock results make the overhead tax clear. Iterative-GEMM is severely penalized by kernel-launch overheads: increasing $k$ by 256x leads to roughly a 300x increase in wall-clock time. In staggering contrast, for the same 256x increase in $k$, both BigGemm and Batched-Gemm see their Wall Clock time increase by only 1.6x. This result proves that for small matrix dimensions, Kernel Launch Amortization is the most important optimization followed by otimizing for GPU resources. By collapsing many launches into one, Batched-GEMM recovers nearly all the performance overhead, coming within 75-80% that of Big-GEMM. 
 
-We further compare the other three techniques by calculating the time ratio with Single Big GEMM as the baseline, which achieves the lowest wallclock time among all techniques. Overall, Strided GEMM performs better than Batched GEMM, with average wallclock time increases of $5\%$ and $32\%$ over Single Big GEMM respectively. However, the most notable observation is that the performance advantage of Strided GEMM and Single Big GEMM diminishes as $N$ increases. This phenomenon becomes most pronounced with larger $k$. For example, when $k=2$, the overhead of Batched GEMM only decreases by $4\%$ (from $37\%$ to $33\%$), and Strided Batched GEMM remains nearly constant as $N$ increases. In contrast, when $k=64$, Batched GEMM overhead drops significantly from $35\%$ to $22\%$, while the overhead of Strided Batched GEMM increases sharply from $1\%$ to $16\%$. 
+![Time Scaling for Tiling Transition Regime](n-2506-time-scale.png)
+![Time Scaling for Memory Streaming Regime](n-4096-time-scale.png)
+
+As we move from the L2-resident regime to larger matrix dimensions, the computational weight of each individual GEMM increases. The GPU time curves for all three implementations track each other closely and scale almost linearly with $k$, suggesting similar device-side efficiency once the matrices no longer sit comfortably in L2. However, kernel-launch overhead remains the dominant tax for the iterative implementation. For example, in the Memory Streaming regime (N = 4096), increasing k by 32x leads to roughly a 60x increase in wall-clock time for Iterative-GEMM, compared to about 4.5x for Big-Gemm and Batched-GEMM.
+
+![Performance Improvement over Ityerative](gemm-speedup.png)
+
+We further compare the other three techniques by calculating the time ratio with Single Big GEMM as the baseline, which achieves the lowest wallclock time among all techniques. Overall, Strided GEMM performs better than Batched GEMM, with average wallclock time increases of $5\%$ and $32\%$ over Single Big GEMM respectively. However, the most notable observation is that the performance advantage of Strided GEMM and Single Big GEMM diminishes as $N$ increases. This phenomenon becomes most pronounced with larger $k$. For example, when $k=2$, the overhead of Batched GEMM only decreases by $4\%$ (from $37\%$ to $33\%$), and Strided Batched GEMM remains nearly constant as $N$ increases. In contrast, when $k=64$, Batched-GEMM overhead drops significantly from $35\%$ to $22\%$, while the overhead of Strided Batched GEMM increases sharply from $1\%$ to $16\%$. 
 
 ![GPU_time_ratio](GPU_time_ratio.jpg)
 
