@@ -189,22 +189,37 @@ The wall-clock results tell a different and more consistent story. Regardless of
 ## Deep dive: Under the hood exploration
 *Caution: This section explores the intricate micro-architectural reasons behind GPU-side performance shifts. Assumes some familarity with GPU micro-architecture. Feel free to skip to the next section: Measuring Performance on Practical LLM Sizes.*
 
-As we observed, Batched-GEMM is significantly faster than the Iterative version on the GPU for $N=1024$, yet it actually becomes 20-30% slower at $N=4096$. This "performance reversal" is driven by how the cuBLAS library manages hardware resources and schedules work across the GPU's Streaming Multiprocessors (SMs). We investigate this behavior by comapring the two regimes using a fixed batch size of $k = 16$. The table below specfies the launch configuration for the kernels.
+As we observed, Batched-GEMM is significantly faster than the Iterative version on the GPU for $N=1024$, yet it actually becomes 20-30% slower at $N=4096$. This "performance reversal" is driven by how the cuBLAS library manages hardware resources and schedules work across the GPU's Streaming Multiprocessors (SMs). We investigate this behavior by comapring the two regimes using a fixed batch size of $k = 16$. The tables below specfies the launch configuration for the kernels.
 
 |Regime | Iterative | Batched |
-|-------|---------------|--------|
+|-------|-----------|---------|
 |N = 1024 | (128, 1, 1) x (128, 1, 1) | (64, 1, 16) x (128, 1, 1) |
 |N = 4096 | (256, 2, 1) x (256, 1, 1) | (512, 2, 16) x (128, 1, 1) |
 
-We further compare the other three techniques by calculating the time ratio with Single Big GEMM as the baseline, which achieves the lowest wallclock time among all techniques. Overall, Strided GEMM performs better than Batched GEMM, with average wallclock time increases of $5\%$ and $32\%$ over Single Big GEMM respectively. However, the most notable observation is that the performance advantage of Strided GEMM and Single Big GEMM diminishes as $N$ increases. This phenomenon becomes most pronounced with larger $k$. For example, when $k=2$, the overhead of Batched GEMM only decreases by $4\%$ (from $37\%$ to $33\%$), and Strided Batched GEMM remains nearly constant as $N$ increases. In contrast, when $k=64$, Batched-GEMM overhead drops significantly from $35\%$ to $22\%$, while the overhead of Strided Batched GEMM increases sharply from $1\%$ to $16\%$. 
+A key consideration in CUDA performance is the available parallelism. In particular, the per-SM limits on resident thread blocks and warps determine how many blocks an SM can keep in flight, and therefore how many active warps the scheduler has available to hide latency and keep execution resources busy (Occupancy in CUDA parlence). With that in mind, we inspected the occupancy-related limits and found that:
+* Iterative cuBLAS Kernels - Each SM can hold just 1 block limited by the shared memory used by the block
+* Batched cuBLAS Kernels - Each SM can hold at most 2 blocks limited by both the register and shared memory usage
+This factor significantly hurts the Iterative implementation at N = 1024: each SM ends up with only 4 active warps (32 x 4 = 128) and on an architecture like the A100, 4 active warps is dangerously low. It provides the scheduler with very little slack to hide instruction latencies or pipeline bubbles. In contrast, the other kernels sustain 8 active warps per SM, improving occupancy and giving the scheduler enough parallelism to better hide latency and keep the GPU busy as the data further reveals this aspect.
 
-![GPU_time_ratio](GPU_time_ratio.jpg)
+![GPU Throughput](overall-throughput.png)
+First, looking at the achieved compute throughput and memory-hierarchy bandwidth across the kernels, we see that the Iterative version at N = 1024 delivers the lowest utilization of both compute and memory resources, consistent with the limited active warps discussed above. The most striking shift occurs when we increase the problem size to N=4096. In this regime, the iterative version achieves the highest compute utilization of all tested implementations. In contrast, Batched-GEMM does not benefit nearly as much from the larger N. Its compute utilization remains roughly similar, while its HBM traffic increases, indicating that it is relying more heavily on off-chip bandwidth rather than turning the larger problem into higher on-chip reuse and higher compute efficiency.
 
-Next we will take a more nuanced look at the GPU execution time. Since GPU execution time excludes kernel launch overhead, the accumulated GPU time of Naive GEMM becomes comparable to the other three methods. The plot above displays the GPU time ratio between Naive GEMM and the two batched techniques. A higher ratio indicates worse Naive GEMM performance relative to the respective methods. This plot reveals two distinct trends: with smaller $N=1024$, both Batched GEMM and Strided Batched GEMM perform approximately 1.5×–2.5× better than Naive GEMM. However, with larger $N=2560$ and $N=4096$, Naive GEMM consistently outperforms the other two methods.
+![Compute Pipeline Utilization](compute-pipeline-throughput.png)
 
-![inst_issued_ratio](inst_issued_ratio.jpg)
+This observation is reinforced when we zoom in on the compute-unit metrics. The iterative kernel at N = 4096 makes strong use of the tensor units and shared memory, aliging two critical resources for high-performance GEMM. In contrast, Batched-GEMM shows noticeably lower utilization of these units, and its utilization remains largely static across different problem sizes.
 
-Here we provide the ratio of total SASS instructions issued by the SMSP. It reveals a similar pattern to the GPU time: when $N=1024$, Naive GEMM issues more SASS instructions, whereas when $N=2560$ and $N=4096$, Naive GEMM issues less. This indicates that cuBLAS likely selects different algorithms or memory strategies for different values of $N$ heuristically, with a transition point occurring between $N=1024$ and $N=2560$. From $N=2560$ to $N=4096$, the instruction ratio of Batched GEMM and Strided Batched GEMM both reaches ~0.9, implying that they are using the same algorithm under the hood when L2 can't store any of the matrix. 
+![Memory Pipeline Utilization](memory-pipeline-throughput.png)
+
+The memory-side metrics tell a consistent story. The L1-related activity here is largely driven by asynchronous copy operations (LDGSTS) that effectively bypass the traditional L1 caching path. At N = 4096, the Iterative kernel primarily keeps the L1/shared-memory path busy, indicating heavier use of on-chip data movement and reuse. In contrast, the Batched kernel shows higher utilization of L2 and HBM, implying more off-chip traffic and, correspondingly, a performance penalty relative to the iterative case.
+
+![Breakdown of stalls that hampers instruction issue](stall-analysis.png)
+
+To wrap up our deep dive, we examine the Instruction Stalls, the specific reasons why a warp is forced to wait instead of issuing an instruction to the hardware. Iterative-GEMM at N = 1024 presents a unique paradox: its total stall count is relatively low, but they become much more visible in performance because the kernel lacks sufficient warp-level parallelism to hide them. The Batched implementation shows much higher stalls due to the Short-Scoreboard (waiting for Shared Memory data). In contrast, the iterative version shows higher stalls because the Math Pipeline is busy. This is generally a healthier sign, since it suggests the kernel is more often compute-limited and is doing a better job keeping the primary execution units occupied. Finally, our analysis shows that Batched versions incur significantly larger stalls due to Synchronization at the Barriers. 
+In summary we observe that:
+* At $N=1024$, batching is 2.4x faster because it exploits the GPU occupancy better.
+* At $N=4096$, iterative is 20-30% faster because it achieves the best tensor cores utilization.
+* The iterative cuBLAS kernels keep data effeciently tiled in fast Shared Memory, whereas batched kernels lean more on L2 and HBM
+* Arithmetic Intensity Scaling: Iterative efficiency improves as matrix dimensions grow, while the batched kernels do not capitalize on this trend to the same extent.
 
 # Practical Workload - llama 3.1
 To contextualize our analysis within realistic scenarios, we evaluate GEMM scaling performance across the attention mechanism ($QK^T$) of llama3.1-8B, llama3.1-70B, and llama3.1-405B variants.
