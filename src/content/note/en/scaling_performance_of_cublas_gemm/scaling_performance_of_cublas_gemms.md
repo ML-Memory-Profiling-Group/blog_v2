@@ -223,27 +223,30 @@ Micro-Architectural Key Takeaways:
 * The iterative cuBLAS kernels keep data effeciently tiled in fast Shared Memory, whereas batched kernels lean more on L2 and HBM
 * Arithmetic Intensity Scaling: Iterative efficiency improves as matrix dimensions grow, while the batched kernels do not capitalize on this trend to the same extent.
 
-# Practical Workload - llama 3.1
+# Real World LLM Workloads: Llama 3.1 Attention GEMM Scaling
 To contextualize our analysis within realistic scenarios, we evaluate GEMM scaling performance across the attention mechanism ($QK^T$) of llama3.1-8B, llama3.1-70B, and llama3.1-405B variants.
 
-## Arithmetic Intensity Analysis
-Arithmetic Intensity (AI) quantifies the computational density, more specifically, FLOPs per byte. High AI signifies compute-bound kernels where computation dominates, whereas low AI indicates memory-bound kernels where data movement constrains performance. This metric is essential for understanding the kernel behavior, therefore we will provide AI for both training and inference phases before going into full details.
+## Roofline Analysis
+Arithmetic Intensity (AI) quantifies the computational density, more specifically, FLOPs per byte. High AI signifies compute-bound kernels where computation dominates, whereas low AI indicates memory-bound kernels where data movement constrains performance. This metric is essential for understanding performance, therefore we will provide AI for both training and inference phases before going into full details.
 
-The matrix dimensions and attention head configuration are enumerated below for both Training and Inference:
+The matrix dimensions and attention head configuration are enumerated below for both Training and Inference for a Context Length $T$:
 
-**Training**
+**Training and Inference Prefill**
 | Model | NumHeads (H) | Hidden Dimension (C) | Per Head Q | Per Head K |
 |-------|--------------:|---------------------:|------------|------------|
 | Llama3.1-8B   | 32  | 4096  | [T x 128] | [T x 128] |
 | Llama3.1-70B  | 64  | 8192  | [T x 128] | [T x 128] |
 | Llama3.1-405B | 128 | 16384 | [T x 128] | [T x 128] |
 
-**Inference**
+**Inference Decode**
+Because LLMs are autoregressive, the decode stage generates only one token at a time, resulting in a Query sequence length of exactly one. This collapses the attention calculation into a series of vector-matrix multiplications (GEMV) as per the table below.
 | Model | NumHeads (H) | Hidden Dimension (C) | Per Head Q | Per Head K |
 |-------|--------------:|---------------------:|------------|------------|
 | Llama3.1-8B   | 32  | 4096  | [1 x 128] | [T x 128] |
 | Llama3.1-70B  | 64  | 8192  | [1 x 128] | [T x 128] |
 | Llama3.1-405B | 128 | 16384 | [1 x 128] | [T x 128] |
+
+From this point on, we use the term “training” to refer to both training and inference prefill, and we use “inference” to refer specifically to the decode stage.
 
 Derived from the $Q$ and $K$ dimensions, the Arithmetic Intensity formulations are:
 
@@ -252,20 +255,20 @@ Derived from the $Q$ and $K$ dimensions, the Arithmetic Intensity formulations a
 | Training | `[T×128] × [128×T] → [T×T]` | $\frac{128T}{256+T}$ |
 | Inference | `[1×128] × [128×T] → [1×T]` | $\frac{128T}{128+129T}$ |
 
-The computed AI values across varying T are tabulated below:
+The computed AI values across varying Context Length $T$ are tabulated below:
 
 | Sequence Length (T) | Training AI (FLOP/Byte) | Inference AI (FLOP/Byte) |
 |--------------------:|---------------:|-----------------:|
-| 1024 | 102.4 | 0.991 |
-| 2048 | 113.8 | 0.992 |
-| 4096 | 120.5 | 0.992 |
-| 8192 | 124.1 | 0.992 |
-| 16384 | 126.0 | 0.992 |
-| 32768 | 127.0 | 0.992 |
-| 65536 | 127.5 | 0.992 |
-| 131072 | 127.8 | 0.992 |
+| 1024 | 102 | 1 |
+| 2048 | 114 | 1 |
+| 4096 | 121 | 1 |
+| 8192 | 124 | 1 |
+| 16384 | 126 | 1 |
+| 32768 | 127 | 1 |
+| 65536 | 128 | 1 |
+| 131072 | 1278 | 1 |
 
- It is noteworthy that the AI of Inference reaches merely ~0.992, representing over 100× lower density than its training counterpart. As T scales, both training and inference AI converge toward 128 and 0.992 respectively. These metrics demonstrate that theotically, inference operates under severe memory bandwidth constraints, with computational resources substantially underutilized.
+It is noteworthy that the AI of Inference reaches merely ~1, representing over 100× lower density than its training counterpart. These metrics demonstrate that theotically, inference operates under severe memory bandwidth constraints, with computational resources substantially underutilized.
 
 ## Training
 We measured the GPU execution time during training and normalized all values against their corresponding $N=1024$ baseline. Since Batched GEMM and Strided Batched GEMM exhibit nearly identical behavior, we present only Batched GEMM results in the plots for clarity and simplicity.
