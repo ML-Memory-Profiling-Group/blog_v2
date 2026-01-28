@@ -270,7 +270,18 @@ The computed AI values across varying Context Length $T$ are tabulated below:
 
 It is noteworthy that the AI of Inference reaches merely ~1, representing over 100× lower density than its training counterpart. These metrics demonstrate that theotically, inference operates under severe memory bandwidth constraints, with computational resources substantially underutilized.
 
-## Training
+Below, we report results by mapping the matrix dimension $N$ to the context length $T$, and the batch size $k$ to the number of attention heads $H$.
+
+## Impact of increase in Context Length
+The charts below show how both wall-clock time and GPU time grow as we increase the context length T for all three models.
+
+![Training: Scaling with Context Length](time-scaling-t-training.png)
+
+While the absolute GPU times differ based on the model’s head count, the scaling trends are remarkably consistent across all three model variants. For both the iterative and batched implementations we observe a highly superlinear increase in time as $T$ grows. Concretely, for the iterative version, increasing T by 16x leads to roughly an 80x increase in GPU time. For the batched version, the superlinear growth is even more pronounced, with the maximum increase reaching about 200x for the same 16x increase in T.
+
+Across all configurations, wall-clock time is largely insensitive when T increases by 2x, suggesting that at small to moderate T the end-to-end runtime is still dominated by fixed overheads rather than kernel execution. However, because Batched-GEMM has much lower launch overhead, increases in GPU time begin to surface in the wall-clock time earlier, especially for the larger models (around the 4x T point). At this scale, the superlinear growth of the GPU kernel finally breaks through the system noise and begins to drive the Wall Clock time upward. When both the context length ($T$) and the model size are at their maximum, the sheer volume of computation finally overwhelms all other factors. In this Extreme Scale regime, both implementations begin to show significant Wall Clock scaling: roughly 80x for the iterative version and about 100x for the batched version.
+
+
 We measured the GPU execution time during training and normalized all values against their corresponding $N=1024$ baseline. Since Batched GEMM and Strided Batched GEMM exhibit nearly identical behavior, we present only Batched GEMM results in the plots for clarity and simplicity.
 
 ![llama_training_normalized_gpu_exec_time](llama_training_normalized_gpu_exec_time.jpg)
