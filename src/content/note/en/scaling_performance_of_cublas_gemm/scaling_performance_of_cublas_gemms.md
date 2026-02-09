@@ -281,6 +281,21 @@ While the absolute GPU times differ based on the model’s head count, the scali
 
 Across all configurations, wall-clock time is largely insensitive when T increases by 2x, suggesting that at small to moderate T the end-to-end runtime is still dominated by fixed overheads rather than kernel execution. However, because Batched-GEMM has much lower launch overhead, increases in GPU time begin to surface in the wall-clock time earlier, especially for the larger models (around the 4x T point). At this scale, the superlinear growth of the GPU kernel finally breaks through the system noise and begins to drive the Wall Clock time upward. When both the context length ($T$) and the model size are at their maximum, the sheer volume of computation finally overwhelms all other factors. In this Extreme Scale regime, both implementations begin to show significant Wall Clock scaling: roughly 80x for the iterative version and about 100x for the batched version.
 
+## Impact of increase in Model Size (aka Heads)
+To isolate the impact of model size, the chart below compares the time scaling of the Llama 3.1 70B and 405B models relative to the 8B baseline. Since the head dimension is constant across these models ($d_h=128$), this comparison represents the pure cost of increasing the number of attention heads from 32 (8B) to 64 (70B) and finally 128 (405B).
+
+![Training: Scaling with Heads](time-scaling-h-training.png)
+
+The results indicate that this scaling is largely independent of context length. In GPU time, both the iterative and batched implementations scale almost exactly with the head count: the 70B and 405B variants are approximately 2x and 4x slower than 8B, respectively, matching the increase in H.
+
+The wall-clock behavior is more nuanced. Up to a context length of 4K, the iterative version also scales by the expected 2x and 4x factors, while the batched version shows little to no increase in wall-clock time, consistent with launch overhead dominating at these sizes. However, at a context length of 8K for the 405B model, the wall-clock time inflates dramatically, reaching roughly 300x and 60x for the iterative and batched implementations, respectively.
+
+## Quantifying the Batched Advantage: End-to-End Speedup
+This section quantifies the direct performance gain of switching from an Iterative loop to a Batched implementation across Llama 3.1 variants. The chart reports the speedup of the batched implementation over the iterative baseline, with all other parameters held constant.
+
+![Training: Batched Speedup](time-scaling-batched-training.png)
+
+Across all three models, at T = 1024 the batched version achieves about a 2.5x GPU-time speedup, indicating better resource utilization in the cache-friendly regime, consistent with our earlier observations. As T increases and the GEMMs move toward a more bandwidth-limited regime, the GPU-time difference largely disappears and both implementations deliver similar device execution time. The wall-clock speedup follows the expected kernel-launch overhead trend and becomes more pronounced as the number of heads increases. As a result, each model exhibits a distinct speedup range for batched execution, reflecting how batching amortizes per-head launch and synchronization costs more effectively at larger H.
 
 We measured the GPU execution time during training and normalized all values against their corresponding $N=1024$ baseline. Since Batched GEMM and Strided Batched GEMM exhibit nearly identical behavior, we present only Batched GEMM results in the plots for clarity and simplicity.
 
