@@ -273,7 +273,9 @@ It is noteworthy that the AI of Inference reaches merely ~1, representing over 1
 Below, we report results by mapping the matrix dimension $N$ to the context length $T$, and the batch size $k$ to the number of attention heads $H$.
 
 ## Impact of increase in Context Length
-The charts below show how both wall-clock time and GPU time grow as we increase the context length T for all three models.
+The charts in this section show how both wall-clock time and GPU time grow as we increase the context length T for all three models.
+
+### Training
 
 ![Training: Scaling with Context Length](time-scaling-t-training.png)
 
@@ -281,10 +283,16 @@ While the absolute GPU times differ based on the model’s head count, the scali
 
 Across all configurations, wall-clock time is largely insensitive when T increases by 2x, suggesting that at small to moderate T the end-to-end runtime is still dominated by fixed overheads rather than kernel execution. However, because Batched-GEMM has much lower launch overhead, increases in GPU time begin to surface in the wall-clock time earlier, especially for the larger models (around the 4x T point). At this scale, the superlinear growth of the GPU kernel finally breaks through the system noise and begins to drive the Wall Clock time upward. When both the context length ($T$) and the model size are at their maximum, the sheer volume of computation finally overwhelms all other factors. In this Extreme Scale regime, both implementations begin to show significant Wall Clock scaling: roughly 80x for the iterative version and about 100x for the batched version.
 
+### Inference
+
 ![Inference: Scaling with Context Length](time-scaling-t-inference.png)
 
+### Key Points
+
 ## Impact of increase in Model Size (aka Heads)
-To isolate the impact of model size, the chart below compares the time scaling of the Llama 3.1 70B and 405B models relative to the 8B baseline. Since the head dimension is constant across these models ($d_h=128$), this comparison represents the pure cost of increasing the number of attention heads from 32 (8B) to 64 (70B) and finally 128 (405B).
+To isolate the impact of model size, the charts below compare the time scaling of the Llama 3.1 70B and 405B models relative to the 8B baseline. Since the head dimension is constant across these models ($d_h=128$), this comparison represents the pure cost of increasing the number of attention heads from 32 (8B) to 64 (70B) and finally 128 (405B).
+
+### Training
 
 ![Training: Scaling with Heads](time-scaling-h-training.png)
 
@@ -292,10 +300,16 @@ The results indicate that this scaling is largely independent of context length.
 
 The wall-clock behavior is more nuanced. Up to a context length of 4K, the iterative version also scales by the expected 2x and 4x factors, while the batched version shows little to no increase in wall-clock time, consistent with launch overhead dominating at these sizes. However, at a context length of 8K for the 405B model, the wall-clock time inflates dramatically, reaching roughly 300x and 60x for the iterative and batched implementations, respectively.
 
+### Inference
+
 ![Inference: Scaling with Heads](time-scaling-h-inference.png)
 
+### Key Points
+
 ## Quantifying the Batched Advantage: End-to-End Speedup
-This section quantifies the direct performance gain of switching from an Iterative loop to a Batched implementation across Llama 3.1 variants. The chart reports the speedup of the batched implementation over the iterative baseline, with all other parameters held constant.
+This section quantifies the direct performance gain of switching from an Iterative loop to a Batched implementation across Llama 3.1 variants. The charts report the speedup of the batched implementation over the iterative baseline, with all other parameters held constant.
+
+### Training
 
 ![Training: Batched Speedup](time-scaling-batched-training.png)
 
@@ -303,7 +317,11 @@ Across all three models, at T = 1024 the batched version achieves about a 2.5x G
 
 We measured the GPU execution time during training and normalized all values against their corresponding $N=1024$ baseline. Since Batched GEMM and Strided Batched GEMM exhibit nearly identical behavior, we present only Batched GEMM results in the plots for clarity and simplicity.
 
+### Inference
+
 ![Inference: Batched Speedup](time-scaling-batched-inference.png)
+
+### Key Points
 
 ![llama_training_normalized_gpu_exec_time](llama_training_normalized_gpu_exec_time.jpg)
 
