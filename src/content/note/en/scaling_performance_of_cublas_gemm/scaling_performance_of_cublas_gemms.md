@@ -287,7 +287,12 @@ Across all configurations, wall-clock time is largely insensitive when T increas
 
 ![Inference: Scaling with Context Length](time-scaling-t-inference.png)
 
+For inference, the GPU-time trend with context length is qualitatively similar to training. For Batched-GEMM, the compute time increases approximately linearly with T, as expected in the decode setting. In contrast, the Iterative version grows sub-linearly, primarily because the smaller GEMM shapes are underutilized at short contexts. Concretely, when context length increases from 1K to 128K, the iterative GPU time rises by only about 16x, whereas the batched GPU time increases by roughly 100x.
+Consistent with the training results, for most configurations, increasing context length has minimal impact on Wall Clock time. The batched version begins to show visible wall-clock growth only at the extreme end: for the largest model, increasing context length by 128x results in only about a 1.6x increase in wall-clock time.
+
 ### Key Points
+* Batched implementations closely reflect the workload’s scaling nature—approaching quadratic ($T^2$) in training/prefill and linear ($T$) in inference, whereas Iterative-GEMM often shows artificially sub-linear growth at smaller shapes due to underutilization.
+* Wall-clock time is dominated by fixed overheads for small-to-moderate T, and only starts tracking GPU time at large T and/or large models, with batched showing earlier visibility because its launch overhead is lower.
 
 ## Impact of increase in Model Size (aka Heads)
 To isolate the impact of model size, the charts below compare the time scaling of the Llama 3.1 70B and 405B models relative to the 8B baseline. Since the head dimension is constant across these models ($d_h=128$), this comparison represents the pure cost of increasing the number of attention heads from 32 (8B) to 64 (70B) and finally 128 (405B).
@@ -304,7 +309,11 @@ The wall-clock behavior is more nuanced. Up to a context length of 4K, the itera
 
 ![Inference: Scaling with Heads](time-scaling-h-inference.png)
 
+Scaling the number of heads ($H$) during inference follows the same fundamental patterns observed in training. The main difference is that at large T the inference curves do not exhibit the same dramatic departures from the baseline trend seen in training, and the scaling remains more consistent across context lengths.
+
 ### Key Points
+* GPU execution time scales perfectly with head count ($2\times$ and $4\times$) across both training and inference
+* Batching makes scaling model width (more heads) virtually free for real-world latency, whereas Iterative execution treats every additional head as a non-negotiable, sequential system-launch penalty.
 
 ## Quantifying the Batched Advantage: End-to-End Speedup
 This section quantifies the direct performance gain of switching from an Iterative loop to a Batched implementation across Llama 3.1 variants. The charts report the speedup of the batched implementation over the iterative baseline, with all other parameters held constant.
@@ -321,7 +330,12 @@ We measured the GPU execution time during training and normalized all values aga
 
 ![Inference: Batched Speedup](time-scaling-batched-inference.png)
 
+In inference decode, the batched-versus-iterative speedup follows the same pattern observed in training/prefill across both GPU time and wall-clock time.
+
 ### Key Points
+* In both training/prefill and inference decode, Batched-GEMM delivers the largest GPU-time speedup at small, underutilized shapes and converges toward Iterative-GEMM as shapes become bandwidth-limited.
+* Wall-clock speedup is more consistent than GPU-time speedup because batching amortizes kernel-launch and synchronization overhead.
+* The wall-clock benefit of batching grows with head count (model size), giving each model a characteristic speedup range.
 
 ![llama_training_normalized_gpu_exec_time](llama_training_normalized_gpu_exec_time.jpg)
 
@@ -333,7 +347,11 @@ The GPU execution time exhibits strong dependence on $N$ but remains relatively 
 
 Despite the GPU execution time advantage at small $N$, Naive GEMM performance degrades substantially when kernel launch overhead is considered. The wallclock time ranges from 35× to 147× slower than Batched GEMM across different values of $k$. This aligns with expectations: as $k$ increases, the number of kernel launches grows proportionally, causing launch overhead to accumulate and dominate total execution time.
 
+## Key Summary
+* Sensitivity to Scaling: Batching is highly sensitive to workload growth because it operates near the hardware's limit, whereas Iterative performance remains numb to scaling until the compute work finally outweighs its massive fixed system-launch tax.
+
 ## Inference
+
 
 ![llama_inference_normalized_gpu_exec_time](llama_inference_normalized_gpu_exec_time.jpg)
 
