@@ -337,60 +337,25 @@ In inference decode, the batched-versus-iterative speedup follows the same patte
 * Wall-clock speedup is more consistent than GPU-time speedup because batching amortizes kernel-launch and synchronization overhead.
 * The wall-clock benefit of batching grows with head count (model size), giving each model a characteristic speedup range.
 
-![llama_training_normalized_gpu_exec_time](llama_training_normalized_gpu_exec_time.jpg)
+## The Memory Wall: HBM Bandwidth Utilization
+In LLM workloads, HBM bandwidth is often the hard ceiling for performance. While the Tensor Cores provide the raw math power, the HBM determines how quickly those cores are fed, particularly in memory-bound regimes. The chart below reports HBM bandwidth utilization for the training/prefill scenarios.
 
-![llama_training_gpu_time_ratio](llama_training_gpu_time_ratio.jpg)
+![Training: HBM Bandwidth](llama-gemm-hbm-util-training.png)
 
-The GPU execution time exhibits strong dependence on $N$ but remains relatively insensitive to variations in $k$. Batched GEMM and Strided Batched GEMM demonstrate more aggressive scaling than Naive GEMM, reaching approximately 3.3×, 13×, and 53× their respective $N=1024$ baselines, whereas Naive GEMM only scales to 2.4×, 6.7×, and 22× for the same values of $N$. However, this does not imply superior efficiency of Naive GEMM over Batched GEMM. The time ratio plot reveals that at $N=1024$, Naive GEMM consistently requires approximately 2.5× longer execution time than Batched GEMM across all values of $k$. As $N$ increases, this performance gap progressively narrows, with both methods achieving comparable performance at $N=8192$.
+As discussed earlier, the iterative variant launches one small GEMM at a time, which limits available parallelism. At small context lengths ($T$), it cannot extract enough parallelism to keep the SMs busy. This lack of compute demand results in an idle memory bus, leading to low HBM BW utilization and poor overall performance. As context length increases and the GEMM dimensions grow, HBM utilization rises and eventually reaches roughly 70–80% of peak. By aggregating multiple heads, the Batched version provides substantially more parallel work, it keeps the compute cores busier and, in turn, keeps HBM more consistently active. Even at smaller contexts, HBM utilization is already around 75%, and it increases further with context length, reaching close to 85% at the largest T. This is also consistent with our earlier kernel-level observations: batched kernels higher HBM utilization is driven by its architectural reliance on HBM/L2 resources rather than the L1/Shared Memory focus of the specialized iterative kernels.
 
-![llama_training_wallclock_time_ratio](llama_training_wallclock_time_ratio.jpg)
-
-Despite the GPU execution time advantage at small $N$, Naive GEMM performance degrades substantially when kernel launch overhead is considered. The wallclock time ranges from 35× to 147× slower than Batched GEMM across different values of $k$. This aligns with expectations: as $k$ increases, the number of kernel launches grows proportionally, causing launch overhead to accumulate and dominate total execution time.
+Finally, even though large dense GEMMs are often considered compute-bound, high sustained HBM bandwidth remains important in practice because it gives cuBLAS more flexibility to feed the tensor cores and schedule tiles efficiently. In other words, compute performance is actually unlocked by memory bandwidth.
 
 ## Key Summary
-* Sensitivity to Scaling: Batching is highly sensitive to workload growth because it operates near the hardware's limit, whereas Iterative performance remains numb to scaling until the compute work finally outweighs its massive fixed system-launch tax.
+* Kernel-launch overhead can dominate end-to-end attention time, and batching over heads largely eliminates this tax (often yielding 100x wall-clock wins at large k/H).
+* Small-scale iterative kernels suffer from a latency-hiding crisis, often maintaining only 4 active warps per SM. The Batched implementation consistently achieves the 8-warp threshold, providing the hardware with the concurrency needed to hide instruction latency. This results in a 2.5x GPU-side speedup for smaller context lengths.
+* Batched/strided-batched GEMM is best when it increases utilization at small shapes and amortizes overhead, but it does not necessarily translate into better GPU-time at large, bandwidth-stressed shapes. It can increase L2/HBM reliance and incur extra shared-memory and barrier stalls.
+* Sensitivity to Scaling: Batching is highly sensitive to workload growth because it operates near the hardware's limit, whereas Iterative performance remains immune to scaling until the compute work finally outweighs its massive fixed system-launch tax.
+* HBM utilization is a direct reflection of work parallelism. The Batched implementation provides enough concurrent work to hit a 75% bandwidth floor immediately, scaling up to 85% as context grows. In contrast, the Iterative version’s memory requests leave the GPU’s data pipe underutilized, proving that memory bandwidth is only as effective as the compute parallelism driving it.
 
-## Inference
-
-
-![llama_inference_normalized_gpu_exec_time](llama_inference_normalized_gpu_exec_time.jpg)
-
-![llama_inference_gpu_time_ratio](llama_inference_gpu_time_ratio.jpg)
-
-During inference, similar trends emerge with notable differences in scaling behavior. GPU execution time continues to scale with $N$, but at a reduced rate. For instance, Batched GEMM with $k=32$ achieves only 1.8×, 3×, and 5.6× the $N=1024$ baseline for $N=2048, 4096, 8192$ respectively, compared to the much steeper 3.3×, 13×, and 53× scaling observed in training at identical $N$ and $k$ values. This attenuated scaling likely stems from the reduced $Q$ matrix dimensions (from $T \times 128$ to $1 \times 128$) during inference, which alleviates memory bandwidth pressure. While Batched GEMM still incurs higher GPU execution time than Naive GEMM, the initial performance gap at small $N$ widens considerably. At $N=1024$, Naive GEMM requires 7.3×–8.6× more time than Batched GEMM during inference, compared to only 2.5× during training. As $N$ continues to grow, the performance gap converges toward parity, though convergence occurs more gradually in the inference regime.
-
-![llama_inference_wallclock_time_ratio](llama_inference_wallclock_time_ratio.jpg)
-
-As anticipated, despite Naive GEMM's advantage in GPU execution time, kernel launch overhead remains the bottleneck for wallclock performance, making it approximately 35×–150× slower than Batched GEMM. However, as $N$ increases, the performance ratio between Naive GEMM and Batched GEMM decreases, particularly in the $k=128$ scenario. This effect arises from the increasing wallclock time of Batched GEMM, likely attributable to the substantial memory traffic generated by large $K$ matrices. Consequently, the growth in GPU execution time outpaces the accumulation of launch overhead, narrowing the performance gap between the two approaches.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# References
+[cuBLAS](https://docs.nvidia.com/cuda/cublas/)
+[cuBLAS Strided Batched Matrix Multiply](https://developer.nvidia.com/blog/cublas-strided-batched-matrix-multiply)
+[Nsight Compute](https://docs.nvidia.com/nsight-compute/index.html)
+[Multi Head Attention](https://github.com/NVIDIA/TensorRT-LLM/blob/main/docs/source/legacy/advanced/gpt-attention.md)
+[FlashAttention](https://github.com/Dao-AILab/flash-attention)
