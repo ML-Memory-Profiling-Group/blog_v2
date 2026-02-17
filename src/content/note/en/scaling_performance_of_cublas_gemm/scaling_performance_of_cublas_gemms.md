@@ -354,8 +354,8 @@ Finally, even though large dense GEMMs are often considered compute-bound, high 
 * HBM utilization is a direct reflection of work parallelism. The Batched implementation provides enough concurrent work to hit a 75% bandwidth floor immediately, scaling up to 85% as context grows. In contrast, the Iterative version’s memory requests leave the GPU’s data pipe underutilized, proving that memory bandwidth is only as effective as the compute parallelism driving it.
 
 # References
-[cuBLAS](https://docs.nvidia.com/cuda/cublas/)
-[cuBLAS Strided Batched Matrix Multiply](https://developer.nvidia.com/blog/cublas-strided-batched-matrix-multiply)
-[Nsight Compute](https://docs.nvidia.com/nsight-compute/index.html)
-[Multi Head Attention](https://github.com/NVIDIA/TensorRT-LLM/blob/main/docs/source/legacy/advanced/gpt-attention.md)
+[cuBLAS](https://docs.nvidia.com/cuda/cublas/)<br>
+[cuBLAS Strided Batched Matrix Multiply](https://developer.nvidia.com/blog/cublas-strided-batched-matrix-multiply)<br>
+[Nsight Compute](https://docs.nvidia.com/nsight-compute/index.html)<br>
+[Multi Head Attention](https://github.com/NVIDIA/TensorRT-LLM/blob/main/docs/source/legacy/advanced/gpt-attention.md)<br>
 [FlashAttention](https://github.com/Dao-AILab/flash-attention)
